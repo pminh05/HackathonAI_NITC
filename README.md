@@ -1,0 +1,422 @@
+# Product Advisor
+
+AI chatbot tư vấn và so sánh sản phẩm theo nhu cầu thực tế của khách hàng. Hệ thống sử dụng LangGraph để quản lý luồng hội thoại, Human-in-the-loop để thu thập thông tin còn thiếu và Qdrant để truy xuất sản phẩm theo từng ngành hàng.
+
+Phiên bản đầu tiên triển khai cho **tủ lạnh**, sau đó mở rộng sang máy lạnh và các sheet sản phẩm khác.
+
+Tài liệu HTTP API, SSE và Human-in-the-loop: [docs/API.md](docs/API.md).
+
+## Yêu cầu hệ thống
+
+- Python 3.11 trở lên.
+- Node.js 20.19 trở lên hoặc Node.js 22.12 trở lên.
+- Tài khoản Google AI và `GOOGLE_API_KEY` hợp lệ.
+- Qdrant Cloud có bật Cloud Inference, collection `tulanh` đã chứa dữ liệu sản phẩm.
+- npm đi kèm Node.js.
+
+Backend và frontend chạy thành hai process riêng:
+
+| Thành phần | URL mặc định |
+| --- | --- |
+| FastAPI | `http://127.0.0.1:8000` |
+| Swagger UI | `http://127.0.0.1:8000/docs` |
+| React/Vite | `http://localhost:5173` |
+
+## Cài đặt và chạy local
+
+Các lệnh dưới đây được chạy từ thư mục gốc của repository.
+
+### 1. Cài dependencies backend
+
+Tạo virtual environment và cài project ở editable mode:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+Trên Windows PowerShell, kích hoạt virtual environment bằng:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+### 2. Cấu hình backend
+
+Tạo file môi trường từ template:
+
+```bash
+cp .env.example .env
+```
+
+Cập nhật tối thiểu ba biến bắt buộc trong `.env`:
+
+```dotenv
+GOOGLE_API_KEY=your-google-api-key
+GEMINI_MODEL=gemini-2.5-flash
+QDRANT_URL=https://your-cluster.qdrant.io
+QDRANT_API_KEY=your-qdrant-api-key
+```
+
+Các giá trị local còn lại có thể giữ mặc định:
+
+```dotenv
+CHECKPOINT_DB_PATH=.data/checkpoints.sqlite
+API_HOST=127.0.0.1
+API_PORT=8000
+API_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+SSE_HEARTBEAT_SECONDS=15
+```
+
+Kiểm tra payload indexes của collection `tulanh`:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m advisor.categories.refrigerator.setup_indexes
+```
+
+Nếu command báo thiếu index, tạo các index còn thiếu một lần:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m advisor.categories.refrigerator.setup_indexes --apply
+```
+
+Lệnh này chỉ tạo payload index; không tạo collection và không import catalog sản phẩm.
+
+### 3. Chạy backend
+
+API MVP phải chạy đúng một worker vì khóa chống request đồng thời theo `thread_id`
+đang được giữ trong memory của process:
+
+```bash
+PYTHONPATH=src .venv/bin/uvicorn advisor.api:app \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --workers 1
+```
+
+Kiểm tra API đã sẵn sàng:
+
+```bash
+curl http://127.0.0.1:8000/healthz
+```
+
+Kết quả mong đợi:
+
+```json
+{"status":"ok"}
+```
+
+### 4. Cài dependencies và chạy frontend
+
+Mở terminal thứ hai, vẫn giữ backend đang chạy:
+
+```bash
+cd frontend
+cp .env.example .env
+npm ci
+npm run dev
+```
+
+Mở `http://localhost:5173`. Frontend mặc định gọi API qua cấu hình:
+
+```dotenv
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+Nếu backend chạy ở địa chỉ khác, sửa `frontend/.env` rồi khởi động lại Vite.
+Dùng `npm install` thay cho `npm ci` khi chủ động cập nhật dependencies hoặc lockfile.
+
+### 5. Kiểm tra build và test
+
+Backend tests:
+
+```bash
+PYTHONPATH=src .venv/bin/pytest -q
+```
+
+Frontend production build:
+
+```bash
+cd frontend
+npm run build
+npm run preview
+```
+
+Build được tạo tại `frontend/dist/`. Lệnh preview chỉ dùng để kiểm tra build local,
+không phải production server.
+
+## Xử lý lỗi thường gặp
+
+- API dừng khi startup: kiểm tra `GOOGLE_API_KEY`, `QDRANT_URL`, `QDRANT_API_KEY` và payload indexes.
+- `GET /healthz` trả `starting`: xem log backend để tìm lỗi kết nối Gemini hoặc Qdrant.
+- Trình duyệt báo CORS: thêm đúng origin frontend vào `API_CORS_ORIGINS`, sau đó restart backend.
+- Frontend không nhận stream: kiểm tra backend ở đúng `VITE_API_BASE_URL` và không có reverse proxy buffer SSE.
+- API trả `409`: thread có thể đang chạy hoặc đang chờ câu trả lời làm rõ; không gửi nhiều request đồng thời.
+- Đổi biến trong `.env`: luôn restart process tương ứng để cấu hình mới có hiệu lực.
+
+## Luồng xử lý
+
+```text
+User message
+    ↓
+Intent & category detection
+    ↓
+Load category config + prompts
+    ↓
+Extract customer need profile
+    ↓
+Check missing required fields
+    ├── Không thiếu → Build filter
+    └── Còn thiếu
+            ↓
+       Sinh toàn bộ câu hỏi cần thiết
+            ↓
+       HITL interrupt một lần
+            ↓
+       Người dùng trả lời toàn bộ form
+            ↓
+       Cập nhật need profile
+            ↓
+Build Qdrant filter
+    ↓
+Search đúng collection ngành hàng
+    ↓
+Gemini structured ranking chọn top 3
+    ↓
+Gemini tạo câu trả lời dạng text, hỗ trợ token streaming
+    ↓
+Grounded advisory response
+```
+
+HITL hiện chỉ dùng **một vòng hỏi**. Hệ thống gom toàn bộ trường còn thiếu thành một JSON form, dừng graph bằng `interrupt()`, sau đó resume bằng cùng `thread_id` khi người dùng gửi câu trả lời.
+
+## Thiết kế state
+
+State là working memory của một phiên tư vấn:
+
+```text
+messages        Lịch sử hội thoại
+routing         Intent và category hiện tại
+need_profile    Nhu cầu, ngân sách, ràng buộc và ưu tiên
+clarification   Câu hỏi HITL và câu trả lời của người dùng
+retrieval       Collection, query plan, filter và candidate IDs
+ranking         Top 3 cùng lý do và trade-off
+response        Câu trả lời cuối
+control         Trạng thái thực thi và phiên bản rule/prompt
+```
+
+Mỗi node đọc state và chỉ cập nhật phần dữ liệu thuộc trách nhiệm của nó. State không chứa toàn bộ catalog hoặc embedding.
+
+## Persistence
+
+LangGraph checkpointer lưu state theo `thread_id`.
+
+```text
+thread_id
+    ↓
+Checkpoint state
+    ↓
+HITL interrupt
+    ↓
+Resume cùng thread_id
+    ↓
+Tiếp tục build filter và search
+```
+
+* Graph programmatic mặc định dùng `InMemorySaver`.
+* FastAPI dùng `AsyncSqliteSaver` và giữ HITL qua restart.
+* Khi cần nhiều worker/replica, thay SQLite bằng PostgreSQL.
+* `user_id`: đại diện cho khách hàng.
+* `thread_id`: đại diện cho từng cuộc hội thoại.
+
+Long-term memory bằng Mem0 chưa được bật trong phiên bản hiện tại. Thư mục `memory/` được giữ sẵn để mở rộng sau.
+
+## Qdrant collections
+
+Mỗi sheet hoặc ngành hàng được index thành một collection riêng:
+
+```text
+Tủ Lạnh    → tulanh
+Máy lạnh   → products_air_conditioner
+Laptop     → products_laptop
+```
+
+Cách chia này giúp:
+
+* Metadata của từng ngành hàng độc lập.
+* Filter đơn giản và ít field rỗng.
+* Dễ re-index từng sheet.
+* Các thành viên có thể làm category riêng, giảm conflict.
+
+Các trường cấu trúc như giá, dung tích, kích thước và thương hiệu được dùng cho metadata filter. Các trường mô tả dài như công nghệ và tiện ích được dùng cho semantic retrieval.
+
+Collection `tulanh` dùng embedding `intfloat/multilingual-e5-small` qua Qdrant Cloud Inference. Trước khi chạy live, kiểm tra payload index:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m advisor.categories.refrigerator.setup_indexes
+```
+
+Nếu lệnh báo thiếu index, tạo chúng một lần bằng:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m advisor.categories.refrigerator.setup_indexes --apply
+```
+
+Runtime chỉ kiểm tra prerequisite và không tự thay đổi schema Qdrant.
+
+## Chạy graph bằng Python
+
+Ngoài FastAPI, graph vẫn có thể được gọi trực tiếp bằng Python:
+
+```python
+from langchain_core.messages import HumanMessage
+from langgraph.types import Command
+
+from advisor.graph import build_graph
+
+graph = build_graph()
+config = {"configurable": {"thread_id": "conversation-1"}}
+
+result = graph.invoke(
+    {"messages": [HumanMessage(content="Tư vấn tủ lạnh cho gia đình tôi")]},
+    config,
+)
+
+questions = result["__interrupt__"][0].value["questions"]
+
+result = graph.invoke(
+    Command(
+        resume={
+            "answers": [
+                {"question_id": "household_size", "option_id": "three_four"},
+                {"question_id": "budget", "option_id": "10m_20m"},
+                {"question_id": "usage_preferences", "option_id": "energy_saving"},
+            ]
+        }
+    ),
+    config,
+)
+
+print(result["response"]["answer"])
+```
+
+Phải dùng lại đúng compiled graph/checkpointer và `thread_id` khi resume. Với option `other`, gửi thêm `custom_answer`.
+
+## Gọi FastAPI và SSE bằng cURL
+
+API dùng SQLite checkpoint để giữ Human-in-the-Loop qua nhiều HTTP request. Chạy đúng một worker:
+
+```bash
+PYTHONPATH=src .venv/bin/uvicorn advisor.api:app \
+  --host 127.0.0.1 --port 8000 --workers 1
+```
+
+Mở một cuộc hội thoại mới. Dùng `-N` để `curl` hiển thị SSE ngay khi server gửi:
+
+```bash
+curl -N http://127.0.0.1:8000/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Tư vấn giúp tôi một chiếc tủ lạnh"}'
+```
+
+Event `session` trả `thread_id`; nếu cần làm rõ, event cuối là `clarification_required`. Gửi toàn bộ câu trả lời bằng đúng thread đó:
+
+```bash
+curl -N http://127.0.0.1:8000/chat/THREAD_ID/resume \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "answers": [
+      {"question_id":"household_size","option_id":"three_four"},
+      {"question_id":"budget","option_id":"10m_20m"},
+      {"question_id":"usage_preferences","option_id":"energy_saving"}
+    ]
+  }'
+```
+
+Trong lượt hoàn tất, API phát các event `token` rồi `completed`. Có thể khôi phục form hoặc kết quả sau khi reload bằng:
+
+```bash
+curl http://127.0.0.1:8000/chat/THREAD_ID
+```
+
+Các endpoint:
+
+- `POST /chat`: tạo thread mới hoặc tiếp tục thread đã hoàn tất.
+- `POST /chat/{thread_id}/resume`: resume HITL.
+- `GET /chat/{thread_id}`: trạng thái, pending questions hoặc kết quả cuối.
+- `GET /healthz`: health check nhẹ.
+
+## Cấu trúc thư mục
+
+```text
+product-advisor/
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx
+│   │   ├── api.ts
+│   │   └── styles.css
+│   ├── package.json
+│   └── vite.config.ts
+│
+├── src/advisor/
+│   ├── graph.py
+│   ├── api.py
+│   ├── state.py
+│   ├── nodes.py
+│   ├── schemas.py
+│   │
+│   ├── categories/
+│   │   ├── refrigerator/
+│   │   │   ├── config.yaml
+│   │   │   ├── prompts.py
+│   │   │   └── filter_builder.py
+│   │   │
+│   │   └── registry.py
+│   │
+│   ├── retrieval/
+│   │   └── qdrant.py
+│   ├── persistence/
+│   │   └── checkpointer.py
+│   └── memory/
+│       └── mem0.py
+│
+└── tests/
+    ├── test_api.py
+    └── categories/
+        └── test_refrigerator.py
+```
+
+## Vai trò các thành phần
+
+* `graph.py`: định nghĩa node, edge, interrupt và routing.
+* `api.py`: FastAPI, SSE streaming, thread validation và HITL resume.
+* `state.py`: định nghĩa LangGraph state.
+* `nodes.py`: logic dùng chung như intent, profile extraction, HITL, retrieval, ranking và response.
+* `schemas.py`: schema cho state, form câu hỏi và structured output.
+* `config.yaml`: collection, required fields và metadata mapping của từng category.
+* `prompts.py`: prompt hỏi lại và prompt tư vấn.
+* `filter_builder.py`: chuyển `need_profile` thành Qdrant filter.
+* `registry.py`: ánh xạ category sang module tương ứng.
+* `retrieval/qdrant.py`: kết nối và truy vấn Qdrant.
+* `persistence/checkpointer.py`: cấu hình persistence.
+* `memory/mem0.py`: placeholder cho long-term memory.
+* `tests/categories/`: test rule, filter và output theo từng ngành hàng.
+* `frontend/src/App.tsx`: reducer, chat UI, clarification flow và local persistence.
+* `frontend/src/api.ts`: HTTP client và SSE parser cho POST stream.
+* `frontend/src/styles.css`: giao diện desktop không phụ thuộc UI framework.
+
+## Mở rộng category mới
+
+Khi thêm một sheet mới:
+
+1. Tạo Qdrant collection riêng.
+2. Tạo thư mục category mới.
+3. Khai báo `config.yaml`.
+4. Viết prompt hỏi lại và prompt tư vấn.
+5. Viết `filter_builder.py`.
+6. Đăng ký category trong `registry.py`.
+7. Thêm test tương ứng.
+
+Graph, state và retrieval core không cần thay đổi.

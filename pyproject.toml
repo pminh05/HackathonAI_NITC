@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "product-advisor"
+version = "0.1.0"
+description = "LangGraph product advisor with HITL, Qdrant retrieval, and a streaming FastAPI."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "google-genai",
+    "httpx",
+    "langchain-google-genai",
+    "langgraph",
+    "langgraph-checkpoint-sqlite",
+    "pydantic-settings",
+    "PyYAML",
+    "pytest",
+    "qdrant-client",
+    "uvicorn[standard]",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/advisor"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

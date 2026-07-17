@@ -1,0 +1,111 @@
+category: refrigerator
+display_name: Tủ Lạnh
+collection: tulanh
+embedding_model: intfloat/multilingual-e5-small
+retrieval_limit: 12
+
+required_profile_fields:
+  - household_size
+  - budget
+  - usage_preferences
+
+payload_fields:
+  brand: metadata.brand
+  style: metadata.kieu_dang_chuan
+  original_price: metadata.gia_goc_vnd
+  promotional_price: metadata.gia_khuyen_mai_vnd
+  capacity: metadata.dung_tich_su_dung_lit
+  people_min: metadata.so_nguoi_min
+  people_max: metadata.so_nguoi_max
+  width: metadata.ngang_cm
+  height: metadata.cao_cm
+  depth: metadata.sau_cm
+  inverter: metadata.co_inverter
+  external_water: metadata.co_lay_nuoc_ngoai
+  automatic_mode: metadata.co_che_do_tu_dong
+
+payload_indexes:
+  metadata.brand: keyword
+  metadata.kieu_dang_chuan: keyword
+  metadata.gia_goc_vnd: integer
+  metadata.gia_khuyen_mai_vnd: integer
+  metadata.dung_tich_su_dung_lit: integer
+  metadata.so_nguoi_min: integer
+  metadata.so_nguoi_max: integer
+  metadata.ngang_cm: integer
+  metadata.cao_cm: integer
+  metadata.sau_cm: integer
+  metadata.co_inverter: bool
+  metadata.co_lay_nuoc_ngoai: bool
+  metadata.co_che_do_tu_dong: bool
+
+question_catalog:
+  household_size:
+    question_type: explicit
+    question: Gia đình bạn có bao nhiêu người sử dụng tủ lạnh?
+    options:
+      - option_id: one_two
+        label: 1–2 người
+        profile_updates: {household_size: 2}
+      - option_id: three_four
+        label: 3–4 người
+        profile_updates: {household_size: 4}
+      - option_id: five
+        label: 5 người
+        profile_updates: {household_size: 5}
+      - option_id: over_five
+        label: Trên 5 người
+        profile_updates: {household_size: 6}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  budget:
+    question_type: explicit
+    question: Ngân sách tối đa bạn dự kiến dành cho tủ lạnh là bao nhiêu?
+    options:
+      - option_id: under_10m
+        label: Dưới 10 triệu đồng
+        profile_updates: {budget_max_vnd: 10000000}
+      - option_id: 10m_20m
+        label: Khoảng 10–20 triệu đồng
+        profile_updates: {budget_max_vnd: 20000000}
+      - option_id: 20m_30m
+        label: Khoảng 20–30 triệu đồng
+        profile_updates: {budget_max_vnd: 30000000}
+      - option_id: over_30m
+        label: Trên 30 triệu đồng
+        profile_updates:
+          budget_segment: premium
+          soft_preferences: [premium]
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  usage_preferences:
+    question_type: implicit
+    question: Thói quen nào giống nhu cầu sử dụng của gia đình bạn nhất?
+    options:
+      - option_id: daily_shopping
+        label: Mua thực phẩm hằng ngày, ít tích trữ
+        profile_updates:
+          usage_preferences: [daily_shopping]
+          implicit_needs: [compact_storage]
+      - option_id: weekly_storage
+        label: Thường mua thực phẩm cho nhiều ngày
+        profile_updates:
+          usage_preferences: [weekly_storage]
+          implicit_needs: [large_capacity, fresh_food_preservation]
+      - option_id: frozen_storage
+        label: Thường trữ nhiều thực phẩm đông lạnh
+        profile_updates:
+          usage_preferences: [frozen_storage]
+          implicit_needs: [large_freezer]
+      - option_id: energy_saving
+        label: Ưu tiên tiết kiệm điện khi sử dụng lâu dài
+        profile_updates:
+          usage_preferences: [energy_saving]
+          soft_preferences: [energy_saving, inverter]
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}

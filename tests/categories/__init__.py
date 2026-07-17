@@ -1,0 +1,2 @@
+"""Category-level scaffold tests."""
+

@@ -1,0 +1,95 @@
+"""Qdrant client and refrigerator semantic-search helpers."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from advisor.schemas import ApplicationSettings, ProductCandidate
+
+if TYPE_CHECKING:
+    from qdrant_client import QdrantClient, models
+
+
+class AdvisorConfigurationError(RuntimeError):
+    """Raised when an external service is configured incompatibly."""
+
+
+def create_qdrant_client(settings: ApplicationSettings) -> QdrantClient:
+    """Create a Cloud-Inference-enabled Qdrant client lazily."""
+    try:
+        from qdrant_client import QdrantClient
+    except ImportError as exc:
+        raise RuntimeError("Install project dependencies before creating Qdrant.") from exc
+
+    if not settings.qdrant_url or not settings.qdrant_api_key:
+        raise AdvisorConfigurationError("QDRANT_URL and QDRANT_API_KEY are required")
+    return QdrantClient(
+        url=settings.qdrant_url,
+        api_key=settings.qdrant_api_key.get_secret_value(),
+        cloud_inference=True,
+        timeout=settings.qdrant_timeout_seconds,
+    )
+
+
+def query_products(
+    client: QdrantClient,
+    *,
+    collection: str,
+    embedding_model: str,
+    query_text: str,
+    query_filter: models.Filter | None,
+    limit: int,
+    timeout: int,
+) -> list[Any]:
+    """Run filtered dense retrieval using the collection's embedding model."""
+    from qdrant_client import models
+
+    result = client.query_points(
+        collection_name=collection,
+        query=models.Document(text=query_text, model=embedding_model),
+        query_filter=query_filter,
+        limit=limit,
+        with_payload=True,
+        with_vectors=False,
+        timeout=timeout,
+    )
+    return list(result.points)
+
+
+def normalize_candidate(point: Any) -> dict[str, Any]:
+    """Whitelist useful catalog fields and omit noisy promotion metadata."""
+    payload = point.payload or {}
+    metadata = payload.get("metadata") or {}
+    promotional_price = metadata.get("gia_khuyen_mai_vnd")
+    original_price = metadata.get("gia_goc_vnd")
+    candidate = ProductCandidate(
+        product_id=str(payload.get("product_id") or point.id),
+        name=str(payload.get("name") or "Sản phẩm chưa có tên"),
+        qdrant_score=float(point.score),
+        brand=metadata.get("brand"),
+        style=metadata.get("kieu_dang_chuan"),
+        effective_price_vnd=promotional_price or original_price,
+        original_price_vnd=original_price,
+        promotional_price_vnd=promotional_price,
+        capacity_lit=metadata.get("dung_tich_su_dung_lit"),
+        suitable_for=metadata.get("Số người sử dụng"),
+        description=payload.get("text"),
+    ).model_dump(mode="json")
+    candidate.update(
+        {
+            "freezer_capacity_lit": metadata.get("dung_tich_ngan_da_lit"),
+            "annual_energy_kwh": metadata.get("dien_nang_kwh_nam"),
+            "inverter": metadata.get("co_inverter"),
+            "external_water": metadata.get("co_lay_nuoc_ngoai"),
+            "automatic_mode": metadata.get("co_che_do_tu_dong"),
+            "dimensions_cm": {
+                "width": metadata.get("ngang_cm"),
+                "height": metadata.get("cao_cm"),
+                "depth": metadata.get("sau_cm"),
+            },
+            "utilities": metadata.get("Tiện ích"),
+            "preservation": metadata.get("Công nghệ bảo quản thực phẩm"),
+            "energy_saving_technology": metadata.get("Công nghệ tiết kiệm điện"),
+        }
+    )
+    return candidate
