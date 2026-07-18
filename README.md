@@ -70,6 +70,18 @@ API_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 SSE_HEARTBEAT_SECONDS=15
 ```
 
+Backend uses SQLite checkpoints by default. For a deployed Supabase/PostgreSQL
+backend, configure the Session pooler connection string instead:
+
+```env
+CHECKPOINT_BACKEND=postgres
+SUPABASE_DATABASE_URL=postgresql://postgres.PROJECT_REF:URL_ENCODED_PASSWORD@HOST:5432/postgres
+```
+
+Keep credentials server-side. URL-encode special characters in the database
+password (for example, `@` as `%40`). PostgreSQL checkpoint tables are created
+automatically on the first backend startup.
+
 Kiểm tra payload indexes của collection `tulanh`:
 
 ```bash
@@ -94,6 +106,19 @@ PYTHONPATH=src .venv/bin/uvicorn advisor.api:app \
   --host 127.0.0.1 \
   --port 8000 \
   --workers 1
+```
+
+When PostgreSQL checkpoints are enabled on Windows, use the bundled selector
+event-loop factory because psycopg async does not support Windows' default
+Proactor event loop:
+
+```powershell
+$env:PYTHONPATH="src"
+.venv\Scripts\uvicorn.exe advisor.api:app `
+  --host 127.0.0.1 `
+  --port 8000 `
+  --workers 1 `
+  --loop advisor.event_loop:postgres_compatible_loop_factory
 ```
 
 Kiểm tra API đã sẵn sàng:

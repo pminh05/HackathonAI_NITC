@@ -47,3 +47,30 @@ async def open_async_sqlite_checkpointer(
     ) as saver:
         await saver.setup()
         yield saver
+
+
+@asynccontextmanager
+async def open_async_checkpointer(
+    settings: ApplicationSettings,
+) -> AsyncIterator[object]:
+    """Open the configured durable checkpointer for the API lifetime."""
+    if settings.checkpoint_backend == "sqlite":
+        async with open_async_sqlite_checkpointer(settings) as saver:
+            yield saver
+        return
+
+    if settings.supabase_database_url is None:
+        raise ValueError(
+            "SUPABASE_DATABASE_URL is required when CHECKPOINT_BACKEND=postgres"
+        )
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    except ImportError as exc:
+        raise RuntimeError(
+            "Install langgraph-checkpoint-postgres to use PostgreSQL checkpoints."
+        ) from exc
+
+    connection_string = settings.supabase_database_url.get_secret_value()
+    async with AsyncPostgresSaver.from_conn_string(connection_string) as saver:
+        await saver.setup()
+        yield saver
