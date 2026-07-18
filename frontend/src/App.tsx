@@ -396,6 +396,32 @@ const progressLabels: Record<string, string> = {
   ranking_completed: "Đang hoàn thiện gợi ý…",
 };
 
+const MAX_MESSAGE_WORDS = 1_000;
+const starterSuggestions = [
+  "Tôi muốn mua một chiếc máy lạnh tốt",
+  "Tủ lạnh cho gia đình 4 người",
+  // "Tôi muốn biết về chính sách đổi trả",
+  // "Tôi muốn biết về chính sách vận chuyển",
+];
+const followUpSuggestions = [
+  // "Tôi muốn biết về chính sách bảo hành",
+  // "Tôi muốn biết về chính sách đổi trả",
+  // "Tôi muốn biết về chính sách vận chuyển",
+  "Tôi muốn biết thêm về sản phẩm",
+  "Tôi muốn biết thêm về giá cả",
+];
+
+function countWords(value: string): number {
+  return value.trim().match(/\S+/g)?.length ?? 0;
+}
+
+function limitWords(value: string, maximum: number): string {
+  const matches = [...value.matchAll(/\S+/g)];
+  if (matches.length <= maximum) return value;
+  const lastWord = matches[maximum - 1];
+  return value.slice(0, (lastWord.index ?? 0) + lastWord[0].length);
+}
+
 function messageFromError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 409)
@@ -802,9 +828,9 @@ export default function App() {
     }
   };
 
-  const sendMessage = async (event?: FormEvent) => {
+  const sendMessage = async (event?: FormEvent, suggestedMessage?: string) => {
     event?.preventDefault();
-    const trimmed = message.trim();
+    const trimmed = (suggestedMessage ?? message).trim();
     if (!trimmed || !canSend || requestInFlight.current) return;
 
     requestInFlight.current = true;
@@ -967,47 +993,84 @@ export default function App() {
       : state.phase === "error"
         ? "Kiểm tra trạng thái trước khi gửi tiếp"
         : "Nhập nhu cầu của bạn…";
+  const messageWordCount = countWords(message);
+  const lastAssistantIndex = state.items.findLastIndex(
+    (item) => item.type === "assistant" && !item.streaming,
+  );
 
   return (
     <div className="app-shell">
       <header className="app-header">
         <div className="brand">
-          <div className="brand-mark" aria-hidden="true">
-            P
-          </div>
+          <img className="brand-mark" src="/advisor-logo.png" alt="" />
           <div>
-            <strong>Product Advisor</strong>
-            <span>Tư vấn sản phẩm theo nhu cầu</span>
+            <strong>Trợ lý AI mua sắm</strong>
+            <span>Tư vấn sản phẩm theo nhu cầu của bạn</span>
           </div>
         </div>
-        {state.threadId ? (
+        <div className="header-actions">
+          <div className="online-status">
+            <span aria-hidden="true" /> Trực tuyến
+          </div>
           <button
             className="new-chat-button"
             type="button"
-            disabled={busy}
+            disabled={busy || (!state.threadId && state.items.length === 0)}
             onClick={startNewConversation}
           >
-            Cuộc trò chuyện mới
+            <span aria-hidden="true">↻</span> Cuộc trò chuyện mới
           </button>
-        ) : null}
+        </div>
       </header>
 
       <main className="chat-main">
         <div className="conversation" aria-live="polite">
           {state.items.length === 0 ? (
-            <section className="welcome-card">
-              <div className="welcome-icon" aria-hidden="true">
-                ✦
+            <>
+              <section className="welcome-card">
+                <div className="welcome-icon">
+                  <img src="/advisor-logo.png" alt="Trợ lý AI" />
+                </div>
+                <h1>Bạn đang tìm sản phẩm nào?</h1>
+                <p>
+                  Hãy mô tả nhu cầu, ngân sách hoặc điều bạn quan tâm.
+                  <br />
+                  <strong>Trợ lý AI</strong> sẽ giúp bạn thu hẹp lựa chọn.
+                </p>
+                <div
+                  className="suggestion-list starter-suggestions"
+                  aria-label="Gợi ý câu hỏi"
+                >
+                  {starterSuggestions.map((suggestion) => (
+                    <button
+                      type="button"
+                      key={suggestion}
+                      disabled={!canSend}
+                      onClick={() => void sendMessage(undefined, suggestion)}
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </section>
+              <div className="message-row assistant-row greeting-row">
+                <img
+                  className="assistant-avatar"
+                  src="/advisor-logo.png"
+                  alt=""
+                />
+                <div className="assistant-result">
+                  <div className="assistant-name">Trợ lý AI</div>
+                  <div className="message assistant-message greeting-message">
+                    Xin chào! Mình có thể giúp bạn tìm sản phẩm phù hợp với nhu
+                    cầu và ngân sách. Bạn đang quan tâm đến sản phẩm nào ạ?
+                  </div>
+                </div>
               </div>
-              <h1>Bạn đang tìm sản phẩm nào?</h1>
-              <p>
-                Hãy mô tả nhu cầu, ngân sách hoặc điều bạn quan tâm. Mình sẽ
-                giúp bạn thu hẹp lựa chọn.
-              </p>
-            </section>
+            </>
           ) : null}
 
-          {state.items.map((item) => {
+          {state.items.map((item, itemIndex) => {
             if (item.type === "user") {
               return (
                 <div className="message-row user-row" key={item.id}>
@@ -1019,10 +1082,13 @@ export default function App() {
               if (!item.text && item.products.length === 0) return null;
               return (
                 <div className="message-row assistant-row" key={item.id}>
-                  <div className="assistant-avatar" aria-hidden="true">
-                    P
-                  </div>
+                  <img
+                    className="assistant-avatar"
+                    src="/advisor-logo.png"
+                    alt=""
+                  />
                   <div className="assistant-result">
+                    <div className="assistant-name">Trợ lý AI</div>
                     {item.text ? (
                       <div className="message assistant-message">
                         <MarkdownText text={item.text} />
@@ -1038,15 +1104,35 @@ export default function App() {
                         ))}
                       </div>
                     ) : null}
+                    {itemIndex === lastAssistantIndex && canSend ? (
+                      <div className="follow-up-block">
+                        <span>Bạn có thể hỏi tiếp</span>
+                        <div className="suggestion-list follow-up-suggestions">
+                          {followUpSuggestions.map((suggestion) => (
+                            <button
+                              type="button"
+                              key={suggestion}
+                              onClick={() =>
+                                void sendMessage(undefined, suggestion)
+                              }
+                            >
+                              {suggestion}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               );
             }
             return (
               <div className="message-row assistant-row" key={item.id}>
-                <div className="assistant-avatar" aria-hidden="true">
-                  P
-                </div>
+                <img
+                  className="assistant-avatar"
+                  src="/advisor-logo.png"
+                  alt=""
+                />
                 <ClarificationCard
                   item={item}
                   disabled={busy || item.submitted}
@@ -1117,10 +1203,11 @@ export default function App() {
         >
           <textarea
             value={message}
-            onChange={(event) => setMessage(event.target.value)}
+            onChange={(event) =>
+              setMessage(limitWords(event.target.value, MAX_MESSAGE_WORDS))
+            }
             onKeyDown={onComposerKeyDown}
             placeholder={composerPlaceholder}
-            maxLength={10_000}
             rows={2}
             disabled={!canSend}
             aria-label="Tin nhắn"
@@ -1131,10 +1218,24 @@ export default function App() {
             disabled={!canSend || !message.trim()}
             aria-label="Gửi tin nhắn"
           >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m3 11 18-8-8 18-2-8-8-2Z" />
+              <path d="m11 13 4-4" />
+            </svg>
             Gửi
           </button>
         </form>
-        <p>Enter để gửi · Shift + Enter để xuống dòng</p>
+        <div className="composer-meta">
+          <span>
+            Giá, tồn kho và khuyến mãi có thể thay đổi, cần xác nhận lại trước
+            khi mua.
+          </span>
+          <strong
+            className={messageWordCount >= MAX_MESSAGE_WORDS ? "at-limit" : ""}
+          >
+            {messageWordCount}/{MAX_MESSAGE_WORDS} từ
+          </strong>
+        </div>
       </footer>
     </div>
   );
