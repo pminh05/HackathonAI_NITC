@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
+from advisor.categories.registry import CategoryRegistry, build_default_registry
 from advisor.nodes import (
     AdvisorRuntime,
     analyze_turn_node,
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 
 def _route_turn(state: AdvisorState) -> str:
     category = state.get("routing", {}).get("category")
-    if category != "refrigerator" or not state.get("routing", {}).get("supported"):
+    if not category or not state.get("routing", {}).get("supported"):
         return "placeholder"
     analysis = state.get("conversation", {}).get("analysis", {})
     action = analysis.get("action", TurnAction.DISCOVER.value)
@@ -70,6 +71,7 @@ def build_graph(
     checkpointer: Any | None = None,
     llm: Any | None = None,
     qdrant_client: Any | None = None,
+    category_registry: CategoryRegistry | None = None,
 ) -> CompiledStateGraph:
     """Compile the graph without making network requests.
 
@@ -83,6 +85,7 @@ def build_graph(
         settings=settings or ApplicationSettings(),
         llm=llm,
         qdrant_client=qdrant_client,
+        category_registry=category_registry or build_default_registry(),
     )
     builder = StateGraph(AdvisorState)
     builder.add_node("prepare_turn", prepare_turn_node)
@@ -113,7 +116,9 @@ def build_graph(
     builder.add_node(
         "compose_response", partial(compose_response_node, advisor_runtime=runtime)
     )
-    builder.add_node("plan_execution", plan_execution_node)
+    builder.add_node(
+        "plan_execution", partial(plan_execution_node, advisor_runtime=runtime)
+    )
     builder.add_node("conversation_response", conversation_response_node)
     builder.add_node("placeholder_response", placeholder_response_node)
 

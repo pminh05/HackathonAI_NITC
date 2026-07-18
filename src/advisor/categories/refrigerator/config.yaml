@@ -10,6 +10,7 @@ required_profile_fields:
   - usage_preferences
 
 payload_fields:
+  brand: 'metadata."brand"'
   style: 'metadata."Kiểu dáng chuẩn"'
   original_price: 'metadata."Giá gốc vnd"'
   promotional_price: 'metadata."Giá khuyến mãi vnd"'
@@ -24,6 +25,7 @@ payload_fields:
   automatic_mode: 'metadata."Có chế độ tự động"'
 
 payload_indexes:
+  'metadata."brand"': keyword
   'metadata."Kiểu dáng chuẩn"': keyword
   'metadata."Giá gốc vnd"': integer
   'metadata."Giá khuyến mãi vnd"': integer

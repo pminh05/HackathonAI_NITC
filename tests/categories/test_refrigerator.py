@@ -225,12 +225,27 @@ def test_filter_config_only_uses_standardized_tulanh_metadata_keys() -> None:
     indexes = config["payload_indexes"]
 
     assert STANDARDIZED_METADATA_KEYS == set(KEY_MAPPING.values())
-    assert {_metadata_key(path) for path in fields} <= STANDARDIZED_METADATA_KEYS
-    assert {_metadata_key(path) for path in indexes} <= STANDARDIZED_METADATA_KEYS
+    allowed_keys = STANDARDIZED_METADATA_KEYS | {"brand"}
+    assert {_metadata_key(path) for path in fields} <= allowed_keys
+    assert {_metadata_key(path) for path in indexes} <= allowed_keys
     assert set(fields) <= set(indexes)
     assert indexes['metadata."Ngang cm"'] == "float"
     assert indexes['metadata."Cao cm"'] == "float"
     assert indexes['metadata."Sâu cm"'] == "float"
+
+
+def test_required_brand_is_a_real_indexed_hard_filter() -> None:
+    config = load_config()
+
+    query_filter = build_filter(
+        {"hard_constraints": {"brands": ["LG", "Samsung"]}},
+        config["payload_fields"],
+    )
+
+    assert query_filter is not None
+    serialized = query_filter.model_dump(mode="json", exclude_none=True)
+    assert serialized["must"][0]["key"] == 'metadata."brand"'
+    assert serialized["must"][0]["match"]["any"] == ["LG", "Samsung"]
 
 
 def test_ingestion_normalizes_dimension_values_as_float() -> None:

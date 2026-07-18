@@ -14,6 +14,24 @@ class AdvisorConfigurationError(RuntimeError):
     """Raised when an external service is configured incompatibly."""
 
 
+def _schema_name(value: Any) -> str:
+    data_type = getattr(value, "data_type", value)
+    raw = getattr(data_type, "value", data_type)
+    return str(raw).lower()
+
+
+def find_missing_indexes(
+    client: Any, collection: str, required: dict[str, str]
+) -> dict[str, str]:
+    """Return absent or mismatched payload index fields for any category."""
+    existing = client.get_collection(collection).payload_schema or {}
+    return {
+        field: schema
+        for field, schema in required.items()
+        if field not in existing or _schema_name(existing[field]) != schema
+    }
+
+
 def create_qdrant_client(settings: ApplicationSettings) -> QdrantClient:
     """Create a Cloud-Inference-enabled Qdrant client lazily."""
     try:

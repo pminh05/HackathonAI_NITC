@@ -357,6 +357,7 @@ product-advisor/
 │   ├── schemas.py
 │   │
 │   ├── categories/
+│   │   ├── base.py
 │   │   ├── refrigerator/
 │   │   │   ├── config.yaml
 │   │   │   ├── prompts.py
@@ -387,7 +388,8 @@ product-advisor/
 * `config.yaml`: collection, required fields và metadata mapping của từng category.
 * `prompts.py`: prompt hỏi lại và prompt tư vấn.
 * `filter_builder.py`: chuyển `need_profile` thành Qdrant filter.
-* `registry.py`: ánh xạ category sang module tương ứng.
+* `base.py`: contract hành vi bắt buộc của mọi category (`CategorySpec`).
+* `registry.py`: lazy-load và validate category spec theo module tương ứng.
 * `retrieval/qdrant.py`: kết nối và truy vấn Qdrant.
 * `persistence/checkpointer.py`: cấu hình persistence.
 * `memory/mem0.py`: placeholder cho long-term memory.
@@ -401,11 +403,12 @@ product-advisor/
 Khi thêm một sheet mới:
 
 1. Tạo Qdrant collection riêng.
-2. Tạo thư mục category mới.
-3. Khai báo `config.yaml`.
-4. Viết prompt hỏi lại và prompt tư vấn.
-5. Viết `filter_builder.py`.
-6. Đăng ký category trong `registry.py`.
-7. Thêm test tương ứng.
+2. Tạo package category mới và export `get_category_spec()`.
+3. Khai báo `config.yaml`, schema profile và question rules.
+4. Viết prompt, filter builder, search-text builder và candidate normalizer.
+5. Thêm test category tương ứng.
+6. Để integration owner đăng ký category trong `registry.py`.
 
 Graph, state và retrieval core không cần thay đổi.
+Ranh giới file, constraint dữ liệu và merge gate được mô tả trong
+[`docs/ADDING_CATEGORIES.md`](docs/ADDING_CATEGORIES.md).

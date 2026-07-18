@@ -38,6 +38,24 @@ def test_registry_can_register_category() -> None:
     assert registry.get("example") == definition
 
 
+def test_default_category_implements_shared_contract() -> None:
+    """Every enabled default category can be loaded without external services."""
+    from advisor.categories.registry import build_default_registry
+
+    registry = build_default_registry()
+    registry.validate_all()
+
+    for name, definition in registry.all().items():
+        if not definition.implemented:
+            continue
+        spec = registry.get_spec(name)
+        spec.validate()
+        assert spec.name == name
+        assert spec.config["category"] == name
+        assert callable(spec.build_filter)
+        assert callable(spec.normalize_candidate)
+
+
 def test_settings_read_fake_environment(monkeypatch) -> None:
     """Settings are read from environment variables without external calls."""
     monkeypatch.setenv("APP_ENV", "test")

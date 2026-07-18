@@ -8,7 +8,7 @@ from typing import Any
 from qdrant_client import models
 
 from advisor.categories.refrigerator import load_config
-from advisor.retrieval.qdrant import create_qdrant_client
+from advisor.retrieval.qdrant import create_qdrant_client, find_missing_indexes
 from advisor.schemas import ApplicationSettings
 
 
@@ -18,24 +18,6 @@ SCHEMA_TYPES = {
     "float": models.PayloadSchemaType.FLOAT,
     "bool": models.PayloadSchemaType.BOOL,
 }
-
-
-def _schema_name(value: Any) -> str:
-    data_type = getattr(value, "data_type", value)
-    raw = getattr(data_type, "value", data_type)
-    return str(raw).lower()
-
-
-def find_missing_indexes(
-    client: Any, collection: str, required: dict[str, str]
-) -> dict[str, str]:
-    """Return absent or mismatched payload index fields."""
-    existing = client.get_collection(collection).payload_schema or {}
-    return {
-        field: schema
-        for field, schema in required.items()
-        if field not in existing or _schema_name(existing[field]) != schema
-    }
 
 
 def ensure_payload_indexes(

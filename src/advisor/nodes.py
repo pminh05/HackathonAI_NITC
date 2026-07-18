@@ -9,25 +9,14 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import interrupt
+from pydantic import BaseModel
 
-from advisor.categories.refrigerator import get_missing_profile_fields, load_config
+from advisor.categories.base import CategorySpec, deserialize_filter, serialize_filter
 from advisor.categories.registry import CategoryRegistry, build_default_registry
-from advisor.categories.refrigerator.filter_builder import (
-    build_filter,
-    deserialize_filter,
-    serialize_filter,
-)
-from advisor.categories.refrigerator.prompts import (
-    build_advisory_prompt,
-    build_custom_answer_prompt,
-    build_need_extraction_prompt,
-    build_response_prompt,
-)
-from advisor.categories.refrigerator.setup_indexes import find_missing_indexes
 from advisor.retrieval.qdrant import (
     AdvisorConfigurationError,
     create_qdrant_client,
-    normalize_candidate,
+    find_missing_indexes,
     query_products,
 )
 from advisor.schemas import (
@@ -35,12 +24,10 @@ from advisor.schemas import (
     CategoryTransition,
     ClarificationQuestion,
     ClarificationSubmission,
-    CustomAnswerInterpretation,
     ExecutionMode,
     IntentLabel,
     ProfilePatch,
     RankingResult,
-    RefrigeratorNeedExtraction,
     TurnAction,
     TurnAnalysisResult,
 )
@@ -100,50 +87,6 @@ tham chiếu. Quy tắc:
 """
 
 
-VALID_PATCH_PATHS = {
-    "household_size",
-    "budget_max_vnd",
-    "budget_segment",
-    "usage_preferences",
-    "soft_preferences",
-    "implicit_needs",
-    "hard_constraints.brands",
-    "hard_constraints.styles",
-    "hard_constraints.min_capacity_lit",
-    "hard_constraints.max_capacity_lit",
-    "hard_constraints.max_width_cm",
-    "hard_constraints.max_height_cm",
-    "hard_constraints.max_depth_cm",
-    "hard_constraints.required_features",
-}
-LIST_PATCH_PATHS = {
-    "usage_preferences",
-    "soft_preferences",
-    "implicit_needs",
-    "hard_constraints.brands",
-    "hard_constraints.styles",
-    "hard_constraints.required_features",
-}
-HARD_RETRIEVAL_PATHS = {
-    "household_size",
-    "budget_max_vnd",
-    "budget_segment",
-    "hard_constraints.brands",
-    "hard_constraints.styles",
-    "hard_constraints.min_capacity_lit",
-    "hard_constraints.max_capacity_lit",
-    "hard_constraints.max_width_cm",
-    "hard_constraints.max_height_cm",
-    "hard_constraints.max_depth_cm",
-    "hard_constraints.required_features",
-}
-PROFILE_QUESTION_PATHS = {
-    "household_size": {"household_size"},
-    "budget": {"budget_max_vnd", "budget_segment"},
-    "usage_preferences": {"usage_preferences"},
-}
-
-
 def create_gemini_chat_model(settings: ApplicationSettings) -> ChatGoogleGenerativeAI:
     """Create the configured Gemini model with the lowest thinking level."""
     try:
@@ -170,9 +113,8 @@ class AdvisorRuntime:
     settings: ApplicationSettings = field(default_factory=ApplicationSettings)
     llm: Any | None = None
     qdrant_client: Any | None = None
-    refrigerator_config: dict[str, Any] = field(default_factory=load_config)
     category_registry: CategoryRegistry = field(default_factory=build_default_registry)
-    _qdrant_checked: bool = False
+    _qdrant_checked_categories: set[str] = field(default_factory=set)
 
     def get_llm(self) -> Any:
         if self.llm is None:
@@ -187,21 +129,29 @@ class AdvisorRuntime:
     def structured(self, schema: type[Any]) -> Any:
         return self.get_llm().with_structured_output(schema, method="json_schema")
 
-    def assert_qdrant_ready(self) -> None:
-        if self._qdrant_checked:
+    def get_category(self, name: str) -> CategorySpec:
+        return self.category_registry.get_spec(name)
+
+    def assert_qdrant_ready(self, category: str) -> None:
+        if category in self._qdrant_checked_categories:
             return
-        config = self.refrigerator_config
+        spec = self.get_category(category)
+        config = spec.config
         missing = find_missing_indexes(
             self.get_qdrant(), config["collection"], config["payload_indexes"]
         )
         if missing:
             fields = ", ".join(sorted(missing))
-            raise AdvisorConfigurationError(
-                "Qdrant collection is missing required payload indexes: "
-                f"{fields}. Run `python -m "
-                "advisor.categories.refrigerator.setup_indexes --apply`."
+            setup_hint = (
+                f" Run `{spec.setup_indexes_command}`."
+                if spec.setup_indexes_command
+                else ""
             )
-        self._qdrant_checked = True
+            raise AdvisorConfigurationError(
+                f"Qdrant category {category!r} is missing required payload "
+                f"indexes: {fields}.{setup_hint}"
+            )
+        self._qdrant_checked_categories.add(category)
 
 
 def _latest_user_text(state: AdvisorState) -> str:
@@ -251,16 +201,16 @@ def _merge_unique(existing: list[Any], incoming: list[Any]) -> list[Any]:
 
 
 def merge_need_profile(
-    current: dict[str, Any], updates: dict[str, Any]
+    current: dict[str, Any], updates: dict[str, Any], *, category: str | None = None
 ) -> dict[str, Any]:
     """Backward-compatible merge used by legacy checkpoints and form options."""
     merged = dict(current)
     for key, value in updates.items():
         if value is None:
             continue
-        if key in {"usage_preferences", "soft_preferences", "implicit_needs"}:
+        if isinstance(value, list):
             merged[key] = _merge_unique(merged.get(key, []), value or [])
-        elif key in {"hard_constraints", "evidence"}:
+        elif isinstance(value, dict):
             nested = dict(merged.get(key) or {})
             for nested_key, nested_value in (value or {}).items():
                 if nested_value in (None, [], {}):
@@ -274,11 +224,7 @@ def merge_need_profile(
             merged[key] = nested
         else:
             merged[key] = value
-    merged.setdefault("category", "refrigerator")
-    merged.setdefault("usage_preferences", [])
-    merged.setdefault("soft_preferences", [])
-    merged.setdefault("implicit_needs", [])
-    merged.setdefault("hard_constraints", {})
+    merged.setdefault("category", category or current.get("category") or "refrigerator")
     return merged
 
 
@@ -552,7 +498,9 @@ def _path_set(profile: dict[str, Any], path: str, value: Any) -> None:
     target[parts[-1]] = value
 
 
-def _path_clear(profile: dict[str, Any], path: str) -> None:
+def _path_clear(
+    profile: dict[str, Any], path: str, list_patch_paths: frozenset[str]
+) -> None:
     parts = path.split(".")
     target = profile
     for part in parts[:-1]:
@@ -560,41 +508,46 @@ def _path_clear(profile: dict[str, Any], path: str) -> None:
         if not isinstance(nested, dict):
             return
         target = nested
-    if path in LIST_PATCH_PATHS:
+    if path in list_patch_paths:
         target[parts[-1]] = []
     else:
         target.pop(parts[-1], None)
 
 
-def _validated_patch_paths(paths: Any) -> list[str]:
-    return [str(path) for path in paths if str(path) in VALID_PATCH_PATHS]
+def _validated_patch_paths(paths: Any, valid_paths: frozenset[str]) -> list[str]:
+    return [str(path) for path in paths if str(path) in valid_paths]
 
 
 def apply_profile_patch(
-    current: dict[str, Any], patch: ProfilePatch
+    current: dict[str, Any], patch: ProfilePatch, category_spec: CategorySpec | None = None
 ) -> tuple[dict[str, Any], list[str]]:
     """Apply clear → set/replace → remove → add without additive corrections."""
+    if category_spec is None:
+        # Backward compatibility for direct callers during the refrigerator MVP.
+        category_spec = build_default_registry().get_spec("refrigerator")
+    valid_paths = category_spec.valid_patch_paths
+    list_paths = category_spec.list_patch_paths
     profile = json.loads(json.dumps(current, ensure_ascii=False, default=str))
     changed_paths: list[str] = []
 
-    for path in _validated_patch_paths(patch.clear):
+    for path in _validated_patch_paths(patch.clear, valid_paths):
         before = _path_get(profile, path)
-        _path_clear(profile, path)
+        _path_clear(profile, path, list_paths)
         if before != _path_get(profile, path):
             changed_paths.append(path)
 
     for operation in (patch.set, patch.replace):
-        for path in _validated_patch_paths(operation):
+        for path in _validated_patch_paths(operation, valid_paths):
             value = operation[path]
-            if path in LIST_PATCH_PATHS and not isinstance(value, list):
+            if path in list_paths and not isinstance(value, list):
                 continue
             before = _path_get(profile, path)
             _path_set(profile, path, value)
             if before != value:
                 changed_paths.append(path)
 
-    for path in _validated_patch_paths(patch.remove):
-        if path not in LIST_PATCH_PATHS:
+    for path in _validated_patch_paths(patch.remove, valid_paths):
+        if path not in list_paths:
             continue
         before = list(_path_get(profile, path) or [])
         removed = patch.remove[path]
@@ -603,8 +556,8 @@ def apply_profile_patch(
         if before != value:
             changed_paths.append(path)
 
-    for path in _validated_patch_paths(patch.add):
-        if path not in LIST_PATCH_PATHS:
+    for path in _validated_patch_paths(patch.add, valid_paths):
+        if path not in list_paths:
             continue
         before = list(_path_get(profile, path) or [])
         value = _merge_unique(before, patch.add[path])
@@ -622,15 +575,15 @@ def apply_profile_patch(
         if key in {"category", "custom_answers", "latest_query"}
     }
     try:
-        validated = RefrigeratorNeedExtraction.model_validate(profile).model_dump(
+        validated = category_spec.profile_model.model_validate(profile).model_dump(
             exclude_none=True
         )
     except ValueError:
         # A malformed generic patch must not corrupt a previously valid profile or
         # trigger a retrying LLM call on the latency-sensitive path.
-        return merge_need_profile({}, current), []
+        return merge_need_profile({}, current, category=category_spec.name), []
     validated.update(extras)
-    profile = merge_need_profile({}, validated)
+    profile = merge_need_profile({}, validated, category=category_spec.name)
     return profile, list(dict.fromkeys(changed_paths))
 
 
@@ -638,13 +591,14 @@ def extract_need_profile_node(
     state: AdvisorState, advisor_runtime: AdvisorRuntime
 ) -> NodeUpdate:
     category = _active_category(state)
-    if category != "refrigerator":
+    if not category:
         return {"control": {**state["control"], "stage": "need_extracted"}}
+    spec = advisor_runtime.get_category(category)
     context = _get_category_context(state, category)
     current = context.get("profile") or {}
     analysis = (state.get("conversation") or {}).get("analysis") or {}
     extraction = advisor_runtime.structured(ProfilePatch).invoke(
-        build_need_extraction_prompt(
+        spec.build_need_extraction_prompt(
             state["control"]["current_user_input"],
             current,
             turn_action=analysis.get("action", TurnAction.DISCOVER.value),
@@ -656,18 +610,18 @@ def extract_need_profile_node(
     )
     if isinstance(extraction, ProfilePatch):
         patch = extraction
-        profile, changed_paths = apply_profile_patch(current, patch)
+        profile, changed_paths = apply_profile_patch(current, patch, spec)
     else:
         # Allows a pending legacy run/fake to complete during rolling deployment.
         updates = extraction.model_dump(exclude_none=True)
-        profile = merge_need_profile(current, updates)
+        profile = merge_need_profile(current, updates, category=category)
         changed_paths = [
             key for key, value in profile.items() if current.get(key) != value
         ]
     resolved = set(
         (context.get("clarification") or {}).get("resolved_fields", [])
     )
-    for question_id, paths in PROFILE_QUESTION_PATHS.items():
+    for question_id, paths in spec.question_profile_paths.items():
         if paths.intersection(changed_paths):
             resolved.discard(question_id)
     profile["latest_query"] = state["control"]["current_user_input"]
@@ -715,15 +669,16 @@ def generate_clarification_node(
     state: AdvisorState, advisor_runtime: AdvisorRuntime
 ) -> NodeUpdate:
     category = _active_category(state)
-    if category != "refrigerator":
+    if not category:
         return {"control": {**state["control"], "stage": "needs_sufficient"}}
+    spec = advisor_runtime.get_category(category)
     context = _get_category_context(state, category)
     profile = context.get("profile") or {}
     previous = context.get("clarification") or {}
     resolved = set(previous.get("resolved_fields") or [])
     missing = [
         field
-        for field in get_missing_profile_fields(profile, advisor_runtime.refrigerator_config)
+        for field in spec.get_missing_profile_fields(profile, spec.config)
         if field not in resolved
     ]
     if not missing:
@@ -742,7 +697,7 @@ def generate_clarification_node(
         }
 
     selected = missing[:3]
-    catalog = advisor_runtime.refrigerator_config["question_catalog"]
+    catalog = spec.config["question_catalog"]
     questions: list[dict[str, Any]] = []
     for question_id in selected:
         options = [
@@ -802,15 +757,16 @@ def _find_option(
 
 def _interpret_custom_answer(
     advisor_runtime: AdvisorRuntime,
+    spec: CategorySpec,
     profile: dict[str, Any],
     question_id: str,
     custom_answer: str,
-) -> CustomAnswerInterpretation:
-    catalog_question = advisor_runtime.refrigerator_config["question_catalog"][
+) -> BaseModel:
+    catalog_question = spec.config["question_catalog"][
         question_id
     ]
-    return advisor_runtime.structured(CustomAnswerInterpretation).invoke(
-        build_custom_answer_prompt(
+    return advisor_runtime.structured(spec.custom_answer_model).invoke(
+        spec.build_custom_answer_prompt(
             {
                 "question": catalog_question["question"],
                 "question_id": question_id,
@@ -829,7 +785,10 @@ def _interpret_custom_answer(
 def collect_clarification_node(
     state: AdvisorState, advisor_runtime: AdvisorRuntime
 ) -> NodeUpdate:
-    category = _active_category(state) or "refrigerator"
+    category = _active_category(state)
+    if not category:
+        raise ValueError("Clarification requires an active category")
+    spec = advisor_runtime.get_category(category)
     context = _get_category_context(state, category)
     clarification = context.get("clarification") or state["clarification"]
     payload = {
@@ -857,7 +816,7 @@ def collect_clarification_node(
     answer_labels: list[str] = []
     for answer in submission.answers:
         option = _find_option(
-            advisor_runtime.refrigerator_config,
+            spec.config,
             answer.question_id,
             answer.option_id,
         )
@@ -865,25 +824,25 @@ def collect_clarification_node(
         if answer.option_id != "other":
             updates = option.get("profile_updates") or {}
             before = json.dumps(profile, ensure_ascii=False, sort_keys=True, default=str)
-            profile = merge_need_profile(profile, updates)
+            profile = merge_need_profile(profile, updates, category=category)
             if before != json.dumps(
                 profile, ensure_ascii=False, sort_keys=True, default=str
             ):
-                changed_paths.extend(PROFILE_QUESTION_PATHS.get(answer.question_id, set()))
+                changed_paths.extend(spec.question_profile_paths.get(answer.question_id, set()))
             continue
 
         custom_answer = (answer.custom_answer or "").strip()
         interpretation = _interpret_custom_answer(
-            advisor_runtime, profile, answer.question_id, custom_answer
+            advisor_runtime, spec, profile, answer.question_id, custom_answer
         )
         interpreted_updates = interpretation.model_dump(
             exclude={"interpretation_status", "raw_answer", "confidence"},
             exclude_none=True,
         )
         before = json.dumps(profile, ensure_ascii=False, sort_keys=True, default=str)
-        profile = merge_need_profile(profile, interpreted_updates)
+        profile = merge_need_profile(profile, interpreted_updates, category=category)
         if before != json.dumps(profile, ensure_ascii=False, sort_keys=True, default=str):
-            changed_paths.extend(PROFILE_QUESTION_PATHS.get(answer.question_id, set()))
+            changed_paths.extend(spec.question_profile_paths.get(answer.question_id, set()))
         custom_evidence[answer.question_id] = {
             "raw_answer": custom_answer,
             "status": interpretation.interpretation_status,
@@ -932,11 +891,14 @@ def _profile_signature(profile: dict[str, Any]) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def plan_execution_node(state: AdvisorState) -> NodeUpdate:
+def plan_execution_node(
+    state: AdvisorState, advisor_runtime: AdvisorRuntime
+) -> NodeUpdate:
     category = _active_category(state)
     if not category:
         return {"control": {**state["control"], "stage": "execution_planned"}}
     context = _get_category_context(state, category)
+    spec = advisor_runtime.get_category(category)
     recommendation = dict(context.get("recommendation_context") or {})
     analysis = (state.get("conversation") or {}).get("analysis") or {}
     action = analysis.get("action", TurnAction.DISCOVER.value)
@@ -968,7 +930,7 @@ def plan_execution_node(state: AdvisorState) -> NodeUpdate:
         mode = ExecutionMode.REUSE
     elif not candidate_pool:
         mode = ExecutionMode.RETRIEVE
-    elif changed_paths & HARD_RETRIEVAL_PATHS:
+    elif changed_paths & spec.hard_retrieval_paths:
         mode = ExecutionMode.RETRIEVE
     elif changed_paths:
         if analysis.get("scope") == "current_recommendations":
@@ -1022,8 +984,12 @@ def plan_execution_node(state: AdvisorState) -> NodeUpdate:
 
 
 def build_filter_node(state: AdvisorState, advisor_runtime: AdvisorRuntime) -> NodeUpdate:
-    config = advisor_runtime.refrigerator_config
-    query_filter = build_filter(state["need_profile"], config["payload_fields"])
+    category = _active_category(state)
+    if not category:
+        raise ValueError("Filter construction requires an active category")
+    spec = advisor_runtime.get_category(category)
+    config = spec.config
+    query_filter = spec.build_filter(state["need_profile"], config["payload_fields"])
     retrieval = {
         **(state.get("retrieval") or {}),
         "collection": config["collection"],
@@ -1036,8 +1002,7 @@ def build_filter_node(state: AdvisorState, advisor_runtime: AdvisorRuntime) -> N
     }
 
 
-def _build_search_text(state: AdvisorState) -> str:
-    profile = state["need_profile"]
+def _base_search_query(state: AdvisorState) -> str:
     category = _active_category(state)
     context = _get_category_context(state, category) if category else {}
     recommendation = context.get("recommendation_context") or {}
@@ -1048,26 +1013,21 @@ def _build_search_text(state: AdvisorState) -> str:
         ]
     else:
         base_query = state["control"]["current_user_input"]
-    parts = [base_query]
-    if profile.get("household_size"):
-        parts.append(f"phù hợp gia đình {profile['household_size']} người")
-    if profile.get("budget_max_vnd"):
-        parts.append(f"ngân sách tối đa {profile['budget_max_vnd']} đồng")
-    parts.extend(profile.get("usage_preferences", []))
-    parts.extend(profile.get("soft_preferences", []))
-    parts.extend(profile.get("implicit_needs", []))
-    hard = profile.get("hard_constraints") or {}
-    if hard:
-        parts.append(json.dumps(hard, ensure_ascii=False, default=str))
-    return ". ".join(str(part) for part in parts if part)
+    return str(base_query)
 
 
 def retrieve_candidates_node(
     state: AdvisorState, advisor_runtime: AdvisorRuntime
 ) -> NodeUpdate:
-    advisor_runtime.assert_qdrant_ready()
-    config = advisor_runtime.refrigerator_config
-    query_text = _build_search_text(state)
+    category = _active_category(state)
+    if not category:
+        raise ValueError("Retrieval requires an active category")
+    spec = advisor_runtime.get_category(category)
+    advisor_runtime.assert_qdrant_ready(category)
+    config = spec.config
+    query_text = spec.build_search_text(
+        state["need_profile"], _base_search_query(state)
+    )
     exclude_ids = set((state.get("retrieval") or {}).get("exclude_product_ids") or [])
     limit = int(config["retrieval_limit"]) * (2 if exclude_ids else 1)
     points = query_products(
@@ -1081,7 +1041,7 @@ def retrieve_candidates_node(
     )
     candidates = [
         candidate
-        for candidate in (normalize_candidate(point) for point in points)
+        for candidate in (spec.normalize_candidate(point) for point in points)
         if candidate["product_id"] not in exclude_ids
     ][: int(config["retrieval_limit"])]
     return {
@@ -1095,19 +1055,6 @@ def retrieve_candidates_node(
     }
 
 
-def _no_match_answer(profile: dict[str, Any]) -> str:
-    constraints: list[str] = []
-    if profile.get("budget_max_vnd"):
-        constraints.append(f"ngân sách tối đa {profile['budget_max_vnd']:,} đồng")
-    if profile.get("household_size"):
-        constraints.append(f"nhu cầu cho {profile['household_size']} người")
-    constraint_text = ", ".join(constraints) or "các điều kiện hiện tại"
-    return (
-        f"Mình chưa tìm thấy tủ lạnh đáp ứng đầy đủ {constraint_text}. "
-        "Bạn có thể cân nhắc nới một điều kiện, nhưng mình chưa tự ý bỏ yêu cầu nào của bạn."
-    )
-
-
 def rank_candidates_node(
     state: AdvisorState, advisor_runtime: AdvisorRuntime
 ) -> NodeUpdate:
@@ -1117,7 +1064,11 @@ def rank_candidates_node(
             "ranking": {"selected_products": []},
             "control": {**state["control"], "stage": "ranking_completed"},
         }
-    prompt = build_advisory_prompt(
+    category = _active_category(state)
+    if not category:
+        raise ValueError("Ranking requires an active category")
+    spec = advisor_runtime.get_category(category)
+    prompt = spec.build_ranking_prompt(
         {
             "need_profile": state["need_profile"],
             "hard_constraints": state["need_profile"].get("hard_constraints", {}),
@@ -1230,8 +1181,12 @@ def compose_response_node(
 ) -> NodeUpdate:
     candidates = state["retrieval"].get("candidates", [])
     selected = state.get("ranking", {}).get("selected_products", [])
+    category = _active_category(state)
+    if not category:
+        raise ValueError("Response composition requires an active category")
+    spec = advisor_runtime.get_category(category)
     if not candidates:
-        return _finalize_response(state, _no_match_answer(state["need_profile"]))
+        return _finalize_response(state, spec.no_match_answer(state["need_profile"]))
     candidates_by_id = {item["product_id"]: item for item in candidates}
     grounded_selection = [
         {**item, "product_data": candidates_by_id[item["product_id"]]}
@@ -1239,7 +1194,7 @@ def compose_response_node(
         if item.get("product_id") in candidates_by_id
     ]
     analysis = (state.get("conversation") or {}).get("analysis") or {}
-    prompt = build_response_prompt(
+    prompt = spec.build_response_prompt(
         {
             "user_query": state["control"]["current_user_input"],
             "turn_action": analysis.get("action", TurnAction.DISCOVER.value),
@@ -1267,8 +1222,8 @@ def placeholder_response_node(state: AdvisorState) -> NodeUpdate:
     if label:
         answer = (
             "Bản hiện tại mới có pipeline tư vấn tủ lạnh; "
-            f"ngành hàng {label.value} sẽ được bổ sung sau."
+            f"ngành hàng {label.value} chưa được bật."
         )
     else:
-        answer = "Mình hiện hỗ trợ luồng tư vấn tủ lạnh. Bạn đang cần tìm loại sản phẩm nào?"
+        answer = "Mình chưa nhận ra ngành hàng bạn cần. Bạn đang muốn tìm loại sản phẩm nào?"
     return _finalize_response(state, answer)
