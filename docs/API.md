@@ -1,6 +1,6 @@
 # Product Advisor API
 
-Tài liệu này mô tả HTTP API của MVP tư vấn tủ lạnh. API dùng FastAPI, lưu trạng thái hội thoại theo `thread_id` và trả kết quả chat bằng Server-Sent Events (SSE).
+Tài liệu này mô tả HTTP API tư vấn tủ lạnh, máy lạnh và máy giặt. API dùng FastAPI, lưu trạng thái hội thoại theo `thread_id` và trả kết quả chat bằng Server-Sent Events (SSE).
 
 ## 1. Chạy dịch vụ
 
@@ -297,15 +297,31 @@ Response khi hoàn tất:
 
 Giá trị `status` gồm `running`, `waiting_for_clarification` và `completed`.
 
-## 5. Form câu hỏi tủ lạnh hiện tại
+## 5. Form câu hỏi theo category
 
-Form thực tế do server trả về có thể chỉ chứa những trường còn thiếu. Catalog MVP hiện hỗ trợ:
+Form thực tế do server trả về có thể chỉ chứa những trường còn thiếu. Catalog tủ lạnh hỗ trợ:
 
 | `question_id` | Các `option_id` hợp lệ |
 | --- | --- |
 | `household_size` | `one_two`, `three_four`, `five`, `over_five`, `other` |
 | `budget` | `under_10m`, `10m_20m`, `20m_30m`, `over_30m`, `other` |
 | `usage_preferences` | `daily_shopping`, `weekly_storage`, `frozen_storage`, `energy_saving`, `other` |
+
+Catalog máy lạnh hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `room_size` | `up_to_15`, `15_20`, `20_30`, `30_40`, `other` |
+| `budget` | `under_10m`, `10m_15m`, `15m_25m`, `over_25m`, `other` |
+| `usage_preferences` | `quiet_sleep`, `energy_saving`, `fast_cooling`, `air_quality`, `smart_control`, `heating`, `other` |
+
+Catalog máy giặt hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `household_size` | `one_two`, `three_five`, `six_seven`, `over_seven`, `other` |
+| `budget` | `under_8m`, `8m_12m`, `12m_20m`, `over_20m`, `other` |
+| `usage_preferences` | `daily_laundry`, `bulky_items`, `hygiene_care`, `energy_saving`, `quick_wash`, `wash_and_dry`, `other` |
 
 Client vẫn nên render theo `questions[].options` từ response thay vì phụ thuộc vào bảng này, vì catalog có thể thay đổi.
 

@@ -1,0 +1,117 @@
+category: air_conditioner
+display_name: Máy lạnh
+collection: maylanh
+embedding_model: intfloat/multilingual-e5-small
+retrieval_limit: 12
+
+required_profile_fields:
+  - room_size
+  - budget
+  - usage_preferences
+
+payload_fields:
+  brand: metadata.brand
+  original_price: 'metadata."Giá gốc vnd"'
+  promotional_price: 'metadata."Giá khuyến mãi vnd"'
+  area_min: 'metadata."Diện tích min m2"'
+  area_max: 'metadata."Diện tích max m2"'
+  volume_min: 'metadata."Thể tích min m3"'
+  volume_max: 'metadata."Thể tích max m3"'
+  machine_type: 'metadata."Loại máy"'
+  inverter: 'metadata."Loại Inverter"'
+  gas_type: 'metadata."Loại Gas"'
+
+payload_indexes:
+  metadata.brand: keyword
+  'metadata."Giá gốc vnd"': integer
+  'metadata."Giá khuyến mãi vnd"': integer
+  'metadata."Diện tích min m2"': integer
+  'metadata."Diện tích max m2"': integer
+  'metadata."Thể tích min m3"': integer
+  'metadata."Thể tích max m3"': integer
+  'metadata."Loại máy"': keyword
+  'metadata."Loại Inverter"': keyword
+  'metadata."Loại Gas"': keyword
+
+question_catalog:
+  room_size:
+    question_type: explicit
+    question: Phòng cần lắp máy lạnh rộng khoảng bao nhiêu mét vuông?
+    options:
+      - option_id: up_to_15
+        label: Tối đa 15 m²
+        profile_updates: {room_area_m2: 15}
+      - option_id: "15_20"
+        label: Trên 15–20 m²
+        profile_updates: {room_area_m2: 20}
+      - option_id: "20_30"
+        label: Trên 20–30 m²
+        profile_updates: {room_area_m2: 30}
+      - option_id: "30_40"
+        label: Trên 30–40 m²
+        profile_updates: {room_area_m2: 40}
+      - option_id: other
+        label: Diện tích khác – tôi muốn nhập số m²
+        profile_updates: {}
+
+  budget:
+    question_type: explicit
+    question: Ngân sách tối đa bạn dự kiến dành cho máy lạnh là bao nhiêu?
+    options:
+      - option_id: under_10m
+        label: Dưới 10 triệu đồng
+        profile_updates: {budget_max_vnd: 10000000}
+      - option_id: 10m_15m
+        label: Khoảng 10–15 triệu đồng
+        profile_updates: {budget_max_vnd: 15000000}
+      - option_id: 15m_25m
+        label: Khoảng 15–25 triệu đồng
+        profile_updates: {budget_max_vnd: 25000000}
+      - option_id: over_25m
+        label: Trên 25 triệu đồng
+        profile_updates:
+          budget_segment: premium
+          soft_preferences: [premium]
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  usage_preferences:
+    question_type: implicit
+    question: Nhu cầu nào quan trọng nhất khi bạn sử dụng máy lạnh?
+    options:
+      - option_id: quiet_sleep
+        label: Lắp phòng ngủ, ưu tiên vận hành êm
+        profile_updates:
+          room_type: bedroom
+          usage_preferences: [quiet_sleep]
+          soft_preferences: [quiet_operation, sleep_mode]
+      - option_id: energy_saving
+        label: Dùng nhiều giờ, ưu tiên tiết kiệm điện
+        profile_updates:
+          usage_preferences: [energy_saving]
+          soft_preferences: [energy_saving, inverter]
+      - option_id: fast_cooling
+        label: Ưu tiên làm lạnh nhanh
+        profile_updates:
+          usage_preferences: [fast_cooling]
+          soft_preferences: [fast_cooling]
+      - option_id: air_quality
+        label: Ưu tiên lọc không khí và hút ẩm
+        profile_updates:
+          usage_preferences: [air_quality]
+          soft_preferences: [air_filtering, dehumidification]
+      - option_id: smart_control
+        label: Ưu tiên Wi-Fi và điều khiển thông minh
+        profile_updates:
+          usage_preferences: [smart_control]
+          soft_preferences: [wifi, smart_control]
+      - option_id: heating
+        label: Cần cả làm lạnh và sưởi ấm
+        profile_updates:
+          usage_preferences: [heating]
+          hard_constraints:
+            machine_types: [two_way]
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}

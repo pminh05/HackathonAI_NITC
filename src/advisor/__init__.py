@@ -1,1 +1,1 @@
-"""LangGraph product advisor with a refrigerator MVP."""
+"""LangGraph product advisor with category-owned recommendation behavior."""

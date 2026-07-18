@@ -1,4 +1,4 @@
-"""Qdrant client and refrigerator semantic-search helpers."""
+"""Qdrant query helpers plus the legacy refrigerator candidate projection."""
 
 from __future__ import annotations
 

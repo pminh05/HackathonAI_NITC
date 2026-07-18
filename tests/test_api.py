@@ -9,7 +9,9 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, AIMessageChunk
 
 from advisor.api import create_app
+from advisor.categories.air_conditioner import load_config as load_air_conditioner_config
 from advisor.categories.refrigerator import load_config
+from advisor.categories.washing_machine import load_config as load_washing_machine_config
 from advisor.schemas import (
     ClarificationDecision,
     CustomAnswerInterpretation,
@@ -77,14 +79,20 @@ class FakeLLM:
 
 class FakeQdrant:
     def __init__(self) -> None:
-        config = load_config()
-        self.payload_schema = {
-            field: SimpleNamespace(data_type=SimpleNamespace(value=schema))
-            for field, schema in config["payload_indexes"].items()
+        self.payload_schemas = {
+            config["collection"]: {
+                field: SimpleNamespace(data_type=SimpleNamespace(value=schema))
+                for field, schema in config["payload_indexes"].items()
+            }
+            for config in (
+                load_config(),
+                load_air_conditioner_config(),
+                load_washing_machine_config(),
+            )
         }
 
-    def get_collection(self, _: str) -> Any:
-        return SimpleNamespace(payload_schema=self.payload_schema)
+    def get_collection(self, collection: str) -> Any:
+        return SimpleNamespace(payload_schema=self.payload_schemas[collection])
 
     def query_points(self, **_: Any) -> Any:
         return SimpleNamespace(

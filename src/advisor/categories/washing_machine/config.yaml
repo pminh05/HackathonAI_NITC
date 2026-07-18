@@ -1,0 +1,120 @@
+category: washing_machine
+display_name: Máy giặt
+collection: maygiat
+embedding_model: intfloat/multilingual-e5-small
+retrieval_limit: 12
+
+required_profile_fields:
+  - household_size
+  - budget
+  - usage_preferences
+
+payload_fields:
+  brand: metadata.brand
+  product_type: metadata.product_type
+  drum_type: metadata.drum_type
+  original_price: metadata.original_price_vnd
+  promotional_price: metadata.promotional_price_vnd
+  wash_capacity: metadata.wash_capacity_kg
+  people_min: metadata.people_min
+  people_max: metadata.people_max
+  inverter: metadata.has_inverter
+  dryer: metadata.has_dryer
+  width: metadata.width_cm
+  height: metadata.height_cm
+  depth: metadata.depth_cm
+
+payload_indexes:
+  metadata.brand: keyword
+  metadata.product_type: keyword
+  metadata.drum_type: keyword
+  metadata.original_price_vnd: integer
+  metadata.promotional_price_vnd: integer
+  metadata.wash_capacity_kg: float
+  metadata.people_min: integer
+  metadata.people_max: integer
+  metadata.has_inverter: bool
+  metadata.has_dryer: bool
+  metadata.width_cm: float
+  metadata.height_cm: float
+  metadata.depth_cm: float
+
+question_catalog:
+  household_size:
+    question_type: explicit
+    question: Gia đình bạn có bao nhiêu người thường xuyên sử dụng máy giặt?
+    options:
+      - option_id: one_two
+        label: 1–2 người
+        profile_updates: {household_size: 2}
+      - option_id: three_five
+        label: 3–5 người
+        profile_updates: {household_size: 5}
+      - option_id: six_seven
+        label: 6–7 người
+        profile_updates: {household_size: 7}
+      - option_id: over_seven
+        label: Trên 7 người
+        profile_updates: {household_size: 8}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  budget:
+    question_type: explicit
+    question: Ngân sách tối đa bạn dự kiến dành cho máy giặt là bao nhiêu?
+    options:
+      - option_id: under_8m
+        label: Dưới 8 triệu đồng
+        profile_updates: {budget_max_vnd: 8000000}
+      - option_id: 8m_12m
+        label: Khoảng 8–12 triệu đồng
+        profile_updates: {budget_max_vnd: 12000000}
+      - option_id: 12m_20m
+        label: Khoảng 12–20 triệu đồng
+        profile_updates: {budget_max_vnd: 20000000}
+      - option_id: over_20m
+        label: Trên 20 triệu đồng
+        profile_updates:
+          budget_segment: premium
+          soft_preferences: [premium]
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  usage_preferences:
+    question_type: implicit
+    question: Nhu cầu nào quan trọng nhất khi gia đình bạn sử dụng máy giặt?
+    options:
+      - option_id: daily_laundry
+        label: Giặt quần áo hằng ngày
+        profile_updates:
+          usage_preferences: [daily_laundry]
+      - option_id: bulky_items
+        label: Thường giặt chăn mền hoặc đồ cồng kềnh
+        profile_updates:
+          usage_preferences: [bulky_items]
+          soft_preferences: [large_capacity]
+      - option_id: hygiene_care
+        label: Ưu tiên vệ sinh cho trẻ nhỏ hoặc người nhạy cảm
+        profile_updates:
+          usage_preferences: [hygiene_care]
+          soft_preferences: [steam, allergy_care, drum_hygiene]
+      - option_id: energy_saving
+        label: Ưu tiên tiết kiệm điện và vận hành êm
+        profile_updates:
+          usage_preferences: [energy_saving]
+          soft_preferences: [energy_saving, inverter, quiet_operation]
+      - option_id: quick_wash
+        label: Cần các chương trình giặt nhanh
+        profile_updates:
+          usage_preferences: [quick_wash]
+          soft_preferences: [quick_wash]
+      - option_id: wash_and_dry
+        label: Cần máy giặt có chức năng sấy
+        profile_updates:
+          usage_preferences: [wash_and_dry]
+          hard_constraints: {dryer: true}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
