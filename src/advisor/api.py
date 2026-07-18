@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from advisor.categories.registry import CategoryRegistry, build_default_registry
 from advisor.graph import build_graph
-from advisor.persistence.checkpointer import open_async_sqlite_checkpointer
+from advisor.persistence.checkpointer import open_async_checkpointer
 from advisor.retrieval.qdrant import (
     AdvisorConfigurationError,
     create_qdrant_client,
@@ -457,7 +457,7 @@ def create_app(
                             f"Qdrant category {category!r} is missing payload "
                             f"indexes: {', '.join(sorted(missing))}.{hint}"
                         )
-            async with open_async_sqlite_checkpointer(app_settings) as checkpointer:
+            async with open_async_checkpointer(app_settings) as checkpointer:
                 application.state.graph = build_graph(
                     settings=app_settings,
                     checkpointer=checkpointer,

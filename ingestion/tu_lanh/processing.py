@@ -11,7 +11,7 @@ except ImportError:
 
 input_file = Path(r"data\tu_lanh.json")
 output_file = Path(r"data\tu_lanh_processed.json")
-IMAGE_PATH = str((Path(__file__).resolve().parents[2] / "public" / "tu_lanh.jpg").resolve())
+IMAGE_PATH =  "/public/tu_lanh.jpg"
 
 MAX_TOKENS = 450
 

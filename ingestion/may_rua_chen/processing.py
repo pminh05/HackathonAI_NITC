@@ -13,7 +13,7 @@ DATASET = "may_rua_chen"
 GROUPS = [["Sức chứa",["Loại sản phẩm","bua_an_viet_min","bua_an_viet_max","bo_chau_au_min","bo_chau_au_max"]],["Khả năng rửa",["Chương trình","so_chuong_trinh","Công nghệ","so_cong_nghe_rua","Tiện ích"]],["Mức tiêu thụ và độ ồn",["tieu_thu_nuoc_min_lit_lan","tieu_thu_nuoc_max_lit_lan","cong_suat_min_w","cong_suat_max_w","do_on_db"]],["Lắp đặt",["cao_cm","ngang_cm","sau_cm","khoi_luong_may_kg","Chất liệu thân vỏ","Chất liệu cửa"]]]
 MAX_TOKENS = 480
 BASE_DIR = Path(__file__).resolve().parent
-IMAGE_PATH = str((BASE_DIR.parent.parent / "public" / f"{DATASET}.jpg").resolve())
+IMAGE_PATH = "/public/may_rua_chen.jpg"
 INPUT_FILE = BASE_DIR / "data" / "may_rua_chen.json"
 OUTPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed.json"
 

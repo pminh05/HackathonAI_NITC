@@ -13,7 +13,7 @@ DATASET = "may_say_quan_ao"
 GROUPS = [["Nhu cầu sấy",["Loại sản phẩm","khoi_luong_say_kg","Số người sử dụng","so_nguoi_min","so_nguoi_max","tai_say_khuyen_nghi_min_kg","tai_say_khuyen_nghi_max_kg"]],["Công nghệ sấy",["Công nghệ sấy","Động cơ","Chương trình","nhiet_do_min_c","nhiet_do_max_c"]],["Tiết kiệm và tiện ích",["Công nghệ tiết kiệm điện","cong_suat_min_w","cong_suat_max_w","Tiện ích","Bảng điều khiển"]],["Lắp đặt",["cao_cm","ngang_cm","sau_cm","khoi_luong_may_kg","Chất liệu ruột"]]]
 MAX_TOKENS = 480
 BASE_DIR = Path(__file__).resolve().parent
-IMAGE_PATH = str((BASE_DIR.parent.parent / "public" / f"{DATASET}.jpg").resolve())
+IMAGE_PATH = "/public/may_say_quan_ao.jpg"
 INPUT_FILE = BASE_DIR / "data" / "may_say_quan_ao.json"
 OUTPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed.json"
 

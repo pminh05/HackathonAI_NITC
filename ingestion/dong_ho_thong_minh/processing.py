@@ -13,7 +13,7 @@ DATASET = "dong_ho_thong_minh"
 GROUPS = [["Màn hình và thiết kế",["Kích thước màn hình","kich_thuoc_man_hinh_inch","Màn hình hiển thị","Độ phân giải","do_phan_giai_chuan","Kích thước mặt","Chất liệu mặt","Chất liệu khung viền","Chất liệu dây"]],["Sức khỏe và luyện tập",["Theo dõi sức khoẻ","Chế độ luyện tập","Tiện ích khác"]],["Kết nối và tương thích",["Kết nối","Tương thích","Hiển thị thông báo","Thực hiện cuộc gọi","Ngôn ngữ"]],["Pin và độ bền",["Thời gian sử dụng","Dung lượng pin","Cổng sạc","Chuẩn chống nước, bụi"]],["Kích thước đeo",["Chu vi cổ tay","Độ rộng dây","khoi_luong_g"]]]
 MAX_TOKENS = 480
 BASE_DIR = Path(__file__).resolve().parent
-IMAGE_PATH = str((BASE_DIR.parent.parent / "public" / f"{DATASET}.jpg").resolve())
+IMAGE_PATH = "/public/dong_ho_thong_minh.jpg"
 INPUT_FILE = BASE_DIR / "data" / "dong_ho_thong_minh.json"
 OUTPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed.json"
 

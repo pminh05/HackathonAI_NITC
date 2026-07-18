@@ -75,6 +75,7 @@ def main():
                 "product_id": product_id,
                 "name": product.get("name"),
                 "text": product.get("text"),
+                "image_path": product.get("image_path"),
                 "metadata": product.get("metadata", {}),
             },
         ))

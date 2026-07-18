@@ -13,7 +13,7 @@ DATASET = "may_lanh"
 GROUPS = [["Không gian phù hợp",["Loại máy","Công suất làm lạnh","dien_tich_min_m2","dien_tich_max_m2","the_tich_min_m3","the_tich_max_m3"]],["Khả năng làm lạnh",["Công nghệ làm lạnh","Chế độ gió","Tiện ích"]],["Tiết kiệm và vận hành",["Loại Inverter","Điện năng tiêu thụ","Hiệu suất năng lượng","Loại Gas"]],["Độ bền và lắp đặt",["Chất liệu dàn tản nhiệt","bao_hanh_may_nen_nam","khoi_luong_phu_kien_chinh_kg","khoi_luong_phu_kien_phu_kg"]]]
 MAX_TOKENS = 480
 BASE_DIR = Path(__file__).resolve().parent
-IMAGE_PATH = str((BASE_DIR.parent.parent / "public" / f"{DATASET}.jpg").resolve())
+IMAGE_PATH = "/public/may_lanh.jpg"
 INPUT_FILE = BASE_DIR / "data" / "may_lanh.json"
 OUTPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed.json"
 

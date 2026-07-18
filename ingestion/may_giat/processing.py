@@ -13,7 +13,7 @@ DATASET = "may_giat"
 GROUPS = [["Nhu cầu sử dụng",["Loại sản phẩm","Lồng giặt","khoi_luong_giat_kg","Số người sử dụng","so_nguoi_min","so_nguoi_max"]],["Khả năng giặt",["Chương trình","so_chuong_trinh","Công nghệ","toc_do_vat_rpm","Công nghệ sấy"]],["Vận hành và tiết kiệm",["Loại Inverter","Động cơ","dien_nang_kwh","Tiện ích","Bảng điều khiển"]],["Lắp đặt",["ngang_mm","sau_mm","cao_mm","Chất liệu ruột","Chất liệu thân vỏ"]]]
 MAX_TOKENS = 480
 BASE_DIR = Path(__file__).resolve().parent
-IMAGE_PATH = str((BASE_DIR.parent.parent / "public" / f"{DATASET}.jpg").resolve())
+IMAGE_PATH = "/public/may_giat.jpg"
 INPUT_FILE = BASE_DIR / "data" / "may_giat.json"
 OUTPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed.json"
 

@@ -25,7 +25,9 @@ class ApplicationSettings(BaseSettings):
     qdrant_url: str | None = None
     qdrant_api_key: SecretStr | None = None
     qdrant_timeout_seconds: int = 60
+    checkpoint_backend: Literal["sqlite", "postgres"] = "sqlite"
     checkpoint_db_path: Path = Path(".data/checkpoints.sqlite")
+    supabase_database_url: SecretStr | None = None
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     api_cors_origins: str = "http://localhost:3000,http://localhost:5173"

@@ -13,7 +13,7 @@ DATASET = "may_tinh_de_ban"
 GROUPS = [["Hiệu năng xử lý",["Công nghệ CPU","Loại CPU","toc_do_cpu_co_ban_ghz","toc_do_cpu_toi_da_ghz"]],["Bộ nhớ",["ram_gb","Loại RAM","bus_ram_mainboard_mhz","so_khe_ram_chuan","Hỗ trợ RAM tối đa"]],["Lưu trữ và đồ họa",["Ổ cứng","dung_luong_o_cung_gb","loai_o_cung_chuan","Thiết kế card","Card đồ họa"]],["Kết nối và phần mềm",["Hệ điều hành","Wifi","Cổng giao tiếp"]],["Nguồn và kích thước",["nguon_dien_min_w","nguon_dien_max_w","dai_mm","rong_mm","day_mm","khoi_luong_kg"]]]
 MAX_TOKENS = 480
 BASE_DIR = Path(__file__).resolve().parent
-IMAGE_PATH = str((BASE_DIR.parent.parent / "public" / f"{DATASET}.jpg").resolve())
+IMAGE_PATH = "/public/may_tinh_de_ban.jpg"
 INPUT_FILE = BASE_DIR / "data" / "may_tinh_de_ban.json"
 OUTPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed.json"
 
