@@ -493,14 +493,14 @@ def test_other_answer_is_interpreted_without_second_interrupt() -> None:
 
 
 def test_unimplemented_intent_returns_placeholder_without_qdrant() -> None:
-    llm = FakeLLM(intent=IntentLabel.DISHWASHER)
+    llm = FakeLLM(intent=IntentLabel.WATER_HEATER)
     qdrant = FakeQdrant()
     graph = build_graph(llm=llm, qdrant_client=qdrant)
     result = graph.invoke(
-        {"messages": [HumanMessage(content="Tư vấn máy rửa chén")]},
+        {"messages": [HumanMessage(content="Tư vấn máy nước nóng")]},
         {"configurable": {"thread_id": "placeholder"}},
     )
-    assert "máy sấy quần áo" in result["response"]["answer"]
+    assert "máy rửa chén" in result["response"]["answer"]
     assert qdrant.query_kwargs is None
 
 
@@ -604,7 +604,7 @@ def test_follow_up_inherits_category_and_reuses_recommendations() -> None:
     ]
 
 
-def test_switching_category_and_returning_restores_refrigerator_context() -> None:
+def test_switching_to_unsupported_category_and_returning_restores_refrigerator_context() -> None:
     llm = FakeLLM(
         analyses=[
             TurnAnalysisResult(
@@ -614,9 +614,9 @@ def test_switching_category_and_returning_restores_refrigerator_context() -> Non
                 has_profile_update=True,
             ),
             TurnAnalysisResult(
-                category=IntentLabel.DISHWASHER,
+                category=IntentLabel.WATER_HEATER,
                 category_transition="switch",
-                switch_evidence="máy rửa chén",
+                switch_evidence="máy nước nóng",
                 action="switch_category",
             ),
             TurnAnalysisResult(
@@ -636,9 +636,9 @@ def test_switching_category_and_returning_restores_refrigerator_context() -> Non
     )
     first_profile = first["need_profile"]
     switched = graph.invoke(
-        {"messages": [HumanMessage(content="Chuyển qua máy rửa chén")]}, config
+        {"messages": [HumanMessage(content="Chuyển qua máy nước nóng")]}, config
     )
-    assert switched["conversation"]["active_category"] == "dishwasher"
+    assert switched["conversation"]["active_category"] == "water_heater"
 
     restored = graph.invoke(
         {"messages": [HumanMessage(content="Quay lại tủ lạnh")]}, config

@@ -14,7 +14,7 @@ clean_data/Final/<Tên thiết bị>.xlsx
 clean_data/Final_json/<Tên thiết bị>.json
         ↓ chạy clean_data/distribute_final_json.py
 <ten_thiet_bi>/data/<ten_thiet_bi>.json
-        ↓ processing.py → changeName.py → dictionary.py → embedding.py → qdrant.py
+        ↓ processing.py → changeName.py → dictionary.py → [embedding.py] → qdrant.py
 Qdrant
 ```
 
@@ -85,8 +85,8 @@ Thứ tự và output:
 | `embedding.py` | `<dataset>_processed_vi.json` | `<dataset>_embedded.json` |
 | `qdrant.py` | `<dataset>_embedded.json` | Collection trên Qdrant |
 
-Máy giặt dùng Qdrant Cloud Inference trực tiếp, nên không cần cài `torch` hoặc
-chạy embedding local:
+Máy giặt và máy rửa chén dùng Qdrant Cloud Inference trực tiếp, nên không cần
+cài `torch` hoặc chạy embedding local:
 
 ```powershell
 python may_giat/processing.py
@@ -99,6 +99,20 @@ Với máy giặt, `qdrant.py` nhận `may_giat_processed_vi.json`, gửi semant
 cho model `intfloat/multilingual-e5-small` trên Qdrant Cloud và upsert point theo
 UUID ổn định. Metadata chuẩn hóa gồm loại máy/lồng, giá, tải giặt, số người,
 inverter, khả năng sấy và kích thước cm.
+
+Máy rửa chén chạy tương tự:
+
+```powershell
+python may_rua_chen/processing.py
+python may_rua_chen/changeName.py
+python may_rua_chen/dictionary.py
+python may_rua_chen/qdrant.py
+```
+
+Collection `mayruachen` dùng UUID ổn định và metadata canonical cho loại lắp
+đặt, giá VND, sức chứa theo bữa ăn Việt/bộ châu Âu, lượng nước, độ ồn và kích
+thước. `category_scope` tách máy rửa chén khỏi sản phẩm máy sấy chén nằm chung
+trong dữ liệu nguồn.
 
 Máy sấy quần áo dùng pipeline local embedding đầy đủ:
 

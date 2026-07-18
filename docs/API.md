@@ -1,8 +1,8 @@
 # Product Advisor API
 
-Tài liệu này mô tả HTTP API tư vấn tủ lạnh, máy lạnh, máy giặt và máy sấy quần
-áo. API dùng FastAPI, lưu trạng thái hội thoại theo `thread_id` và trả kết quả
-chat bằng Server-Sent Events (SSE).
+Tài liệu này mô tả HTTP API tư vấn tủ lạnh, máy lạnh, máy giặt, máy sấy quần áo
+và máy rửa chén. API dùng FastAPI, lưu trạng thái hội thoại theo `thread_id` và
+trả kết quả chat bằng Server-Sent Events (SSE).
 
 ## 1. Chạy dịch vụ
 
@@ -332,6 +332,14 @@ Catalog máy sấy quần áo hỗ trợ:
 | `household_size` | `one_two`, `three_five`, `six_seven`, `over_seven`, `other` |
 | `budget` | `under_10m`, `10m_15m`, `15m_20m`, `over_20m`, `other` |
 | `usage_preferences` | `rainy_season`, `frequent_drying`, `bulky_items`, `delicate_care`, `energy_saving`, `quick_dry`, `other` |
+
+Catalog máy rửa chén hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `installation` | `freestanding`, `built_in`, `semi_integrated`, `mini`, `flexible`, `other` |
+| `capacity` | `compact`, `standard`, `large`, `open`, `other` |
+| `budget` | `under_12m`, `12m_18m`, `18m_25m`, `over_25m`, `other` |
 
 Client vẫn nên render theo `questions[].options` từ response thay vì phụ thuộc vào bảng này, vì catalog có thể thay đổi.
 

@@ -1,0 +1,109 @@
+category: dishwasher
+display_name: Máy rửa chén
+collection: mayruachen
+embedding_model: intfloat/multilingual-e5-small
+retrieval_limit: 12
+
+required_profile_fields:
+  - installation
+  - capacity
+  - budget
+
+payload_fields:
+  category_scope: metadata.category_scope
+  brand: metadata.brand
+  product_type: metadata.product_type
+  original_price: metadata.original_price_vnd
+  promotional_price: metadata.promotional_price_vnd
+  vietnamese_meals_max: metadata.vietnamese_meals_max
+  place_settings_max: metadata.place_settings_max
+  water_max: metadata.water_max_l_per_cycle
+  noise: metadata.noise_db
+  width: metadata.width_cm
+  height: metadata.height_cm
+  depth: metadata.depth_cm
+
+payload_indexes:
+  metadata.category_scope: keyword
+  metadata.brand: keyword
+  metadata.product_type: keyword
+  metadata.original_price_vnd: integer
+  metadata.promotional_price_vnd: integer
+  metadata.vietnamese_meals_max: integer
+  metadata.place_settings_max: integer
+  metadata.water_max_l_per_cycle: float
+  metadata.noise_db: float
+  metadata.width_cm: float
+  metadata.height_cm: float
+  metadata.depth_cm: float
+
+question_catalog:
+  installation:
+    question_type: explicit
+    question: Bạn cần máy rửa chén theo kiểu lắp đặt nào?
+    options:
+      - option_id: freestanding
+        label: Máy độc lập
+        profile_updates:
+          hard_constraints: {product_types: [freestanding]}
+      - option_id: built_in
+        label: Máy âm tủ
+        profile_updates:
+          hard_constraints: {product_types: [built_in]}
+      - option_id: semi_integrated
+        label: Máy bán âm
+        profile_updates:
+          hard_constraints: {product_types: [semi_integrated]}
+      - option_id: mini
+        label: Máy mini hoặc để bàn
+        profile_updates:
+          hard_constraints: {product_types: [mini]}
+      - option_id: flexible
+        label: Chưa xác định, có thể linh hoạt
+        profile_updates:
+          soft_preferences: [installation_flexible]
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  capacity:
+    question_type: explicit
+    question: Lượng chén đĩa trong mỗi lần rửa thường ở mức nào?
+    options:
+      - option_id: compact
+        label: Nhỏ, khoảng 6–8 bộ châu Âu
+        profile_updates: {capacity_segment: compact}
+      - option_id: standard
+        label: Tiêu chuẩn, khoảng 11–13 bộ
+        profile_updates: {capacity_segment: standard}
+      - option_id: large
+        label: Lớn, từ 14 bộ
+        profile_updates: {capacity_segment: large}
+      - option_id: open
+        label: Chưa xác định sức chứa
+        profile_updates: {capacity_segment: open}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  budget:
+    question_type: explicit
+    question: Ngân sách tối đa bạn dự kiến dành cho máy rửa chén là bao nhiêu?
+    options:
+      - option_id: under_12m
+        label: Tối đa 12 triệu đồng
+        profile_updates: {budget_max_vnd: 12000000}
+      - option_id: 12m_18m
+        label: Khoảng 12–18 triệu đồng
+        profile_updates: {budget_max_vnd: 18000000}
+      - option_id: 18m_25m
+        label: Khoảng 18–25 triệu đồng
+        profile_updates: {budget_max_vnd: 25000000}
+      - option_id: over_25m
+        label: Trên 25 triệu đồng
+        profile_updates:
+          budget_segment: premium
+          soft_preferences: [premium]
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}

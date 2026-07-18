@@ -2,9 +2,9 @@
 
 AI chatbot tư vấn và so sánh sản phẩm theo nhu cầu thực tế của khách hàng. Hệ thống sử dụng LangGraph để quản lý luồng hội thoại, Human-in-the-loop để thu thập thông tin còn thiếu và Qdrant để truy xuất sản phẩm theo từng ngành hàng.
 
-Phiên bản hiện tại triển khai đầy đủ cho **tủ lạnh**, **máy lạnh**, **máy giặt**
-và **máy sấy quần áo**, sau đó có thể mở rộng sang các sheet sản phẩm khác qua
-`CategorySpec`.
+Phiên bản hiện tại triển khai đầy đủ cho **tủ lạnh**, **máy lạnh**, **máy giặt**,
+**máy sấy quần áo** và **máy rửa chén**, sau đó có thể mở rộng sang các sheet
+sản phẩm khác qua `CategorySpec`.
 
 Tài liệu HTTP API, SSE và Human-in-the-loop: [docs/API.md](docs/API.md).
 
@@ -13,8 +13,8 @@ Tài liệu HTTP API, SSE và Human-in-the-loop: [docs/API.md](docs/API.md).
 - Python 3.11 trở lên.
 - Node.js 20.19 trở lên hoặc Node.js 22.12 trở lên.
 - Tài khoản Google AI và `GOOGLE_API_KEY` hợp lệ.
-- Qdrant Cloud có bật Cloud Inference, collection `tulanh`, `maylanh`, `maygiat`
-  và `maysayquanao` đã chứa dữ liệu sản phẩm.
+- Qdrant Cloud có bật Cloud Inference, collection `tulanh`, `maylanh`, `maygiat`,
+  `maysayquanao` và `mayruachen` đã chứa dữ liệu sản phẩm.
 - npm đi kèm Node.js.
 
 Backend và frontend chạy thành hai process riêng:
@@ -109,6 +109,15 @@ Với collection `maygiat`:
 ```bash
 PYTHONPATH=src .venv/bin/python -m advisor.categories.washing_machine.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.washing_machine.setup_indexes --apply
+```
+
+Với collection `maysayquanao` và `mayruachen`:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m advisor.categories.dryer.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.dryer.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.dishwasher.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.dishwasher.setup_indexes --apply
 ```
 
 Lệnh này chỉ tạo payload index; không tạo collection và không import catalog sản phẩm.
@@ -271,6 +280,7 @@ Tủ Lạnh    → tulanh
 Máy lạnh   → maylanh
 Máy giặt   → maygiat
 Máy sấy quần áo → maysayquanao
+Máy rửa chén → mayruachen
 Laptop     → products_laptop
 ```
 
@@ -285,15 +295,16 @@ Các trường chuẩn hóa như giá, dung tích, kích thước và tính năn
 cho metadata filter. Thương hiệu cùng các trường mô tả dài như công nghệ và tiện
 ích được đưa vào semantic retrieval.
 
-Collection `tulanh`, `maylanh`, `maygiat` và `maysayquanao` dùng embedding
-`intfloat/multilingual-e5-small`. Trước khi chạy live, kiểm tra payload index của
-từng category:
+Collection `tulanh`, `maylanh`, `maygiat`, `maysayquanao` và `mayruachen` dùng
+embedding `intfloat/multilingual-e5-small`. Trước khi chạy live, kiểm tra payload
+index của từng category:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m advisor.categories.refrigerator.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.air_conditioner.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.washing_machine.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.dryer.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.dishwasher.setup_indexes
 ```
 
 Nếu lệnh báo thiếu index, tạo chúng một lần bằng:
@@ -303,6 +314,7 @@ PYTHONPATH=src .venv/bin/python -m advisor.categories.refrigerator.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.air_conditioner.setup_indexes --apply
 PYTHONPATH=src .venv/bin/python -m advisor.categories.washing_machine.setup_indexes --apply
 PYTHONPATH=src .venv/bin/python -m advisor.categories.dryer.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.dishwasher.setup_indexes --apply
 ```
 
 Runtime chỉ kiểm tra prerequisite và không tự thay đổi schema Qdrant.
@@ -432,6 +444,12 @@ product-advisor/
 │   │   │   ├── prompts.py
 │   │   │   ├── filter_builder.py
 │   │   │   └── normalizer.py
+│   │   ├── dishwasher/
+│   │   │   ├── config.yaml
+│   │   │   ├── schemas.py
+│   │   │   ├── prompts.py
+│   │   │   ├── filter_builder.py
+│   │   │   └── normalizer.py
 │   │   │
 │   │   └── registry.py
 │   │
@@ -448,7 +466,8 @@ product-advisor/
         ├── test_refrigerator.py
         ├── test_air_conditioner.py
         ├── test_washing_machine.py
-        └── test_dryer.py
+        ├── test_dryer.py
+        └── test_dishwasher.py
 ```
 
 ## Vai trò các thành phần
