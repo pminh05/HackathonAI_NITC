@@ -94,6 +94,7 @@ def create_payload(product, product_id):
         "product_id": product_id,
         "name": product.get("name"),
         "text": product.get("text"),
+        "image_path": product.get("image_path"),
         "metadata": metadata,
     }
 
