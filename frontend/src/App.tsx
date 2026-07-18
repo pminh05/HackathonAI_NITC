@@ -479,7 +479,7 @@ function ClarificationCard({
   onSelect: (questionId: string, optionId: string) => void;
   onCustomAnswer: (questionId: string, value: string) => void;
   onConfirm: (questionId: string) => void;
-  onSubmit: () => void;
+  onSubmit: (answers: ClarificationAnswer[]) => void;
 }) {
   const activeIndex = item.confirmedIds.length;
   const activeQuestion = item.questions[activeIndex];
@@ -496,6 +496,35 @@ function ClarificationCard({
     currentAnswer &&
       (currentAnswer.option_id !== "other" || currentAnswer.custom_answer?.trim()),
   );
+
+  const answersWith = (answer: ClarificationAnswer): ClarificationAnswer[] =>
+    item.questions
+      .map((question) =>
+        question.question_id === answer.question_id
+          ? answer
+          : item.answers[question.question_id],
+      )
+      .filter((value): value is ClarificationAnswer => Boolean(value));
+
+  const selectOption = (questionId: string, optionId: string) => {
+    const answer: ClarificationAnswer = { question_id: questionId, option_id: optionId };
+    onSelect(questionId, optionId);
+    if (optionId === "other") return;
+    if (activeIndex === item.questions.length - 1) {
+      onSubmit(answersWith(answer));
+    } else {
+      onConfirm(questionId);
+    }
+  };
+
+  const confirmCustomAnswer = () => {
+    if (!activeQuestion || !currentAnswer || !currentValid) return;
+    if (activeIndex === item.questions.length - 1) {
+      onSubmit(answersWith(currentAnswer));
+    } else {
+      onConfirm(activeQuestion.question_id);
+    }
+  };
 
   return (
     <section className="clarification-card" aria-label="Câu hỏi làm rõ">
@@ -523,7 +552,7 @@ function ClarificationCard({
                   name={activeQuestion.question_id}
                   value={option.option_id}
                   checked={currentAnswer?.option_id === option.option_id}
-                  onChange={() => onSelect(activeQuestion.question_id, option.option_id)}
+                  onChange={() => selectOption(activeQuestion.question_id, option.option_id)}
                 />
                 <span>{option.label}</span>
               </label>
@@ -541,23 +570,19 @@ function ClarificationCard({
               />
             </label>
           ) : null}
-          <button
-            className="primary-button question-next"
-            type="button"
-            disabled={!currentValid || disabled}
-            onClick={() => onConfirm(activeQuestion.question_id)}
-          >
-            Tiếp tục
-          </button>
+          {currentAnswer?.option_id === "other" ? (
+            <button
+              className="primary-button question-next"
+              type="button"
+              disabled={!currentValid || disabled}
+              onClick={confirmCustomAnswer}
+            >
+              Xác nhận
+            </button>
+          ) : null}
         </fieldset>
       ) : null}
-
-      {activeIndex === item.questions.length && !item.submitted ? (
-        <button className="primary-button submit-answers" type="button" disabled={disabled} onClick={onSubmit}>
-          Tìm sản phẩm phù hợp
-        </button>
-      ) : null}
-      {item.submitted ? <div className="submitted-note">✓ Đã gửi đầy đủ câu trả lời</div> : null}
+      {item.submitted ? <div className="submitted-note">✓ Đã gửi câu trả lời</div> : null}
     </section>
   );
 }
@@ -725,10 +750,12 @@ export default function App() {
     }
   };
 
-  const submitClarification = async (item: ClarificationItem) => {
+  const submitClarification = async (
+    item: ClarificationItem,
+    answers: ClarificationAnswer[],
+  ) => {
     if (requestInFlight.current || !state.threadId) return;
-    const answers = item.questions.map((question) => item.answers[question.question_id]);
-    if (answers.some((answer) => !answer) || item.confirmedIds.length !== item.questions.length) return;
+    if (answers.length !== item.questions.length) return;
 
     requestInFlight.current = true;
     const controller = new AbortController();
@@ -796,7 +823,7 @@ export default function App() {
   };
 
   const composerPlaceholder = activeClarification
-    ? "Hãy trả lời các câu hỏi làm rõ phía trên"
+    ? "Hãy hoàn tất các lựa chọn phía trên"
     : busy
       ? "Product Advisor đang xử lý…"
       : state.phase === "error"
@@ -867,7 +894,7 @@ export default function App() {
                   onConfirm={(questionId) =>
                     dispatch({ type: "CONFIRM_ANSWER", itemId: item.id, questionId })
                   }
-                  onSubmit={() => void submitClarification(item)}
+                  onSubmit={(answers) => void submitClarification(item, answers)}
                 />
               </div>
             );

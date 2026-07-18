@@ -40,7 +40,7 @@ export type SseEvent =
   | { event: "progress"; data: { stage: string } }
   | {
       event: "clarification_required";
-      data: { thread_id: string; questions: ClarificationQuestion[] };
+      data: { thread_id: string; message?: string; questions: ClarificationQuestion[] };
     }
   | { event: "token"; data: { delta: string } }
   | {

@@ -31,6 +31,7 @@ POST /chat
                                       │
                                       ▼
                          POST /chat/{thread_id}/resume
+                              với toàn bộ quick options
                                       │
                                       └── token* ──> completed
 ```
@@ -39,7 +40,8 @@ Quy tắc quan trọng:
 
 - Client phải lưu `thread_id` nhận từ event `session`.
 - Khi nhận `clarification_required`, client hiển thị các câu hỏi multiple choice.
-- Lệnh resume phải trả lời **đủ tất cả** câu hỏi đang chờ, mỗi câu đúng một lần.
+- Lệnh resume phải trả lời đầy đủ mọi câu đang chờ, mỗi câu đúng một lần.
+- Khi thread đang chờ, client hoàn tất form rồi gọi `/resume`; `/chat` sẽ trả `409`.
 - `question_id` và `option_id` phải được lấy từ form server trả về, không nên hard-code phía client.
 - Nếu chọn option `other`, phải gửi thêm `custom_answer` khác rỗng.
 - Sau khi thread hoàn tất, có thể gửi tin nhắn tiếp theo bằng `POST /chat` với `thread_id` cũ.
@@ -67,7 +69,7 @@ Danh sách event:
 | --- | --- | --- |
 | `session` | Event đầu tiên của mỗi stream | `thread_id`, `mode` |
 | `progress` | Graph vừa hoàn thành một công đoạn | `stage` |
-| `clarification_required` | Graph tạm dừng để chờ người dùng | `thread_id`, `questions` |
+| `clarification_required` | Graph tạm dừng để chờ người dùng | `thread_id`, `message`, `questions` |
 | `token` | Một phần nội dung trả lời của AI | `delta` |
 | `completed` | Lượt xử lý đã hoàn tất | `thread_id`, `answer`, `selected_products` |
 | `error` | Lỗi xảy ra sau khi stream đã mở | `code`, `message`, `retryable` |
@@ -110,7 +112,7 @@ Response `200`:
 
 ### `POST /chat`
 
-Tạo cuộc hội thoại mới hoặc gửi tin nhắn tiếp theo vào một thread đã hoàn tất.
+Tạo cuộc hội thoại mới hoặc gửi follow-up vào thread đã hoàn tất.
 
 Request tạo thread mới:
 
@@ -132,7 +134,7 @@ Request tiếp tục thread cũ:
 | Field | Kiểu | Bắt buộc | Ràng buộc |
 | --- | --- | --- | --- |
 | `message` | string | Có | Sau khi trim phải có nội dung, tối đa 10.000 ký tự |
-| `thread_id` | UUID hoặc `null` | Không | Bỏ trống để server tạo UUID mới; nếu có thì thread phải tồn tại và đã hoàn tất |
+| `thread_id` | UUID hoặc `null` | Không | Bỏ trống để server tạo UUID mới; nếu có thì thread phải tồn tại và không đang chạy |
 
 Ví dụ stream yêu cầu làm rõ:
 
@@ -313,12 +315,12 @@ Client vẫn nên render theo `questions[].options` từ response thay vì phụ
 | --- | --- |
 | `404 Not Found` | `thread_id` không tồn tại |
 | `409 Conflict` | Thread đang chạy, đang chờ HITL nhưng gọi `/chat`, chưa sẵn sàng, hoặc gọi resume khi không chờ HITL |
-| `422 Unprocessable Entity` | Body sai schema, thiếu câu trả lời, thừa `question_id`, sai `option_id`, lặp câu hỏi hoặc thiếu `custom_answer` cho `other` |
+| `422 Unprocessable Entity` | Body sai schema, thiếu/thừa `question_id`, sai `option_id`, lặp câu hỏi hoặc thiếu `custom_answer` cho `other` |
 | SSE `error.code=configuration_error` | Thiếu/sai cấu hình dịch vụ; không nên retry nguyên request cho đến khi server được sửa |
 | SSE `error.code=service_error` | Lỗi runtime từ graph hoặc dịch vụ phụ thuộc; có thể retry |
 | SSE `error.code=incomplete_run` | Graph dừng mà không tạo form hoặc kết quả cuối; có thể retry |
 
-Ví dụ `422` khi không trả lời đủ form:
+Ví dụ `422` khi chưa trả lời đủ form:
 
 ```json
 {

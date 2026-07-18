@@ -10,7 +10,6 @@ required_profile_fields:
   - usage_preferences
 
 payload_fields:
-  brand: metadata.brand
   style: metadata.kieu_dang_chuan
   original_price: metadata.gia_goc_vnd
   promotional_price: metadata.gia_khuyen_mai_vnd
@@ -25,7 +24,6 @@ payload_fields:
   automatic_mode: metadata.co_che_do_tu_dong
 
 payload_indexes:
-  metadata.brand: keyword
   metadata.kieu_dang_chuan: keyword
   metadata.gia_goc_vnd: integer
   metadata.gia_khuyen_mai_vnd: integer

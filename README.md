@@ -159,52 +159,36 @@ không phải production server.
 ## Luồng xử lý
 
 ```text
-User message
+User message / clarification answer
     ↓
-Intent & category detection
-    ↓
-Load category config + prompts
-    ↓
-Extract customer need profile
-    ↓
-Check missing required fields
-    ├── Không thiếu → Build filter
-    └── Còn thiếu
-            ↓
-       Sinh toàn bộ câu hỏi cần thiết
-            ↓
-       HITL interrupt một lần
-            ↓
-       Người dùng trả lời toàn bộ form
-            ↓
-       Cập nhật need profile
-            ↓
-Build Qdrant filter
-    ↓
-Search đúng collection ngành hàng
-    ↓
-Gemini structured ranking chọn top 3
-    ↓
-Gemini tạo câu trả lời dạng text, hỗ trợ token streaming
-    ↓
-Grounded advisory response
+Analyze category, turn action and product references
+    ├── Detail / compare / explain → reuse recommendation context
+    ├── More options → rerank unseen cached candidates
+    └── New or changed needs → apply profile patch
+                                  ↓
+                            Re-check missing fields
+                              ├── Còn thiếu → HITL form
+                              └── Đủ → reuse / rerank / retrieve
+                                                   ↓
+                                      Grounded streamed response
 ```
 
-HITL hiện chỉ dùng **một vòng hỏi**. Hệ thống gom toàn bộ trường còn thiếu thành một JSON form, dừng graph bằng `interrupt()`, sau đó resume bằng cùng `thread_id` khi người dùng gửi câu trả lời.
+HITL đưa tối đa ba thông tin còn thiếu và yêu cầu trả lời đầy đủ form. Giao diện
+tự chuyển sang câu tiếp theo sau mỗi lựa chọn và tự động retrieval ngay khi câu
+cuối hoàn tất. Lựa chọn `other` cho phép nhập câu trả lời riêng.
 
 ## Thiết kế state
 
 State là working memory của một phiên tư vấn:
 
 ```text
-messages        Lịch sử hội thoại
-routing         Intent và category hiện tại
-need_profile    Nhu cầu, ngân sách, ràng buộc và ưu tiên
-clarification   Câu hỏi HITL và câu trả lời của người dùng
-retrieval       Collection, query plan, filter và candidate IDs
-ranking         Top 3 cùng lý do và trade-off
-response        Câu trả lời cuối
-control         Trạng thái thực thi và phiên bản rule/prompt
+messages          Lịch sử đầy đủ của user và assistant
+conversation      Active category, turn action và execution mode
+category_contexts Profile, clarification và recommendations riêng từng category
+need_profile      Projection tương thích của profile đang active
+clarification     Projection câu hỏi HITL hiện tại
+retrieval/ranking Kết quả của lượt hiện tại
+response/control  Câu trả lời và trạng thái thực thi
 ```
 
 Mỗi node đọc state và chỉ cập nhật phần dữ liệu thuộc trách nhiệm của nó. State không chứa toàn bộ catalog hoặc embedding.
@@ -231,7 +215,10 @@ Tiếp tục build filter và search
 * `user_id`: đại diện cho khách hàng.
 * `thread_id`: đại diện cho từng cuộc hội thoại.
 
-Long-term memory bằng Mem0 chưa được bật trong phiên bản hiện tại. Thư mục `memory/` được giữ sẵn để mở rộng sau.
+Long-term memory bằng Mem0 chưa được bật. Checkpoint chỉ là short-term memory của
+thread; recommendation cache và clarification không được thiết kế để đưa vào
+Mem0. Khi tích hợp sau này, thông tin khách vừa nói sẽ ưu tiên hơn thread context,
+và thread context ưu tiên hơn default từ Mem0.
 
 ## Qdrant collections
 
@@ -250,7 +237,9 @@ Cách chia này giúp:
 * Dễ re-index từng sheet.
 * Các thành viên có thể làm category riêng, giảm conflict.
 
-Các trường cấu trúc như giá, dung tích, kích thước và thương hiệu được dùng cho metadata filter. Các trường mô tả dài như công nghệ và tiện ích được dùng cho semantic retrieval.
+Các trường chuẩn hóa như giá, dung tích, kích thước và tính năng boolean được dùng
+cho metadata filter. Thương hiệu cùng các trường mô tả dài như công nghệ và tiện
+ích được đưa vào semantic retrieval.
 
 Collection `tulanh` dùng embedding `intfloat/multilingual-e5-small` qua Qdrant Cloud Inference. Trước khi chạy live, kiểm tra payload index:
 
