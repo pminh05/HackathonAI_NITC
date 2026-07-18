@@ -1,4 +1,13 @@
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  FormEvent,
+  KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -32,7 +41,13 @@ type ClarificationItem = {
   submitted: boolean;
 };
 type TimelineItem = UserItem | AssistantItem | ClarificationItem;
-type Phase = "idle" | "sending" | "waiting" | "resuming" | "restoring" | "error";
+type Phase =
+  | "idle"
+  | "sending"
+  | "waiting"
+  | "resuming"
+  | "restoring"
+  | "error";
 
 interface ChatState {
   threadId: string | null;
@@ -49,10 +64,29 @@ type Action =
   | { type: "SET_PHASE"; phase: Phase; progress?: string | null }
   | { type: "SET_PROGRESS"; progress: string | null }
   | { type: "APPEND_TOKEN"; id: string; delta: string }
-  | { type: "COMPLETE"; id: string; answer: string; products: SelectedProduct[] }
-  | { type: "ADD_CLARIFICATION"; assistantId: string; questions: ClarificationQuestion[] }
-  | { type: "SELECT_OPTION"; itemId: string; questionId: string; optionId: string }
-  | { type: "SET_CUSTOM_ANSWER"; itemId: string; questionId: string; value: string }
+  | {
+      type: "COMPLETE";
+      id: string;
+      answer: string;
+      products: SelectedProduct[];
+    }
+  | {
+      type: "ADD_CLARIFICATION";
+      assistantId: string;
+      questions: ClarificationQuestion[];
+    }
+  | {
+      type: "SELECT_OPTION";
+      itemId: string;
+      questionId: string;
+      optionId: string;
+    }
+  | {
+      type: "SET_CUSTOM_ANSWER";
+      itemId: string;
+      questionId: string;
+      value: string;
+    }
   | { type: "CONFIRM_ANSWER"; itemId: string; questionId: string }
   | { type: "MARK_SUBMITTED"; itemId: string }
   | { type: "RECONCILE_WAITING"; questions: ClarificationQuestion[] }
@@ -77,8 +111,16 @@ function loadState(): ChatState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyState;
-    const saved = JSON.parse(raw) as { version?: number; threadId?: unknown; items?: unknown };
-    if (saved.version !== 1 || typeof saved.threadId !== "string" || !Array.isArray(saved.items)) {
+    const saved = JSON.parse(raw) as {
+      version?: number;
+      threadId?: unknown;
+      items?: unknown;
+    };
+    if (
+      saved.version !== 1 ||
+      typeof saved.threadId !== "string" ||
+      !Array.isArray(saved.items)
+    ) {
       return emptyState;
     }
     return {
@@ -99,7 +141,8 @@ function validStoredAnswer(
   answer: ClarificationAnswer | undefined,
 ): answer is ClarificationAnswer {
   if (!answer || answer.question_id !== question.question_id) return false;
-  if (!question.options.some((option) => option.option_id === answer.option_id)) return false;
+  if (!question.options.some((option) => option.option_id === answer.option_id))
+    return false;
   return answer.option_id !== "other" || Boolean(answer.custom_answer?.trim());
 }
 
@@ -112,10 +155,15 @@ function reconcileClarification(
 
   for (const question of questions) {
     const answer = existing?.answers[question.question_id];
-    if (validStoredAnswer(question, answer)) answers[question.question_id] = answer;
+    if (validStoredAnswer(question, answer))
+      answers[question.question_id] = answer;
   }
   for (const question of questions) {
-    if (!existing?.confirmedIds.includes(question.question_id) || !answers[question.question_id]) break;
+    if (
+      !existing?.confirmedIds.includes(question.question_id) ||
+      !answers[question.question_id]
+    )
+      break;
     confirmedIds.push(question.question_id);
   }
 
@@ -141,7 +189,8 @@ function reducer(state: ChatState, action: Action): ChatState {
       return {
         ...state,
         phase: action.phase,
-        progress: action.progress === undefined ? state.progress : action.progress,
+        progress:
+          action.progress === undefined ? state.progress : action.progress,
         error: action.phase === "error" ? state.error : null,
       };
     case "SET_PROGRESS":
@@ -164,7 +213,12 @@ function reducer(state: ChatState, action: Action): ChatState {
         error: null,
         items: state.items.map((item) =>
           item.id === action.id && item.type === "assistant"
-            ? { ...item, text: action.answer, products: action.products.slice(0, 3), streaming: false }
+            ? {
+                ...item,
+                text: action.answer,
+                products: action.products.slice(0, 3),
+                streaming: false,
+              }
             : item,
         ),
       };
@@ -183,7 +237,8 @@ function reducer(state: ChatState, action: Action): ChatState {
       return {
         ...state,
         items: state.items.map((item) => {
-          if (item.id !== action.itemId || item.type !== "clarification") return item;
+          if (item.id !== action.itemId || item.type !== "clarification")
+            return item;
           return {
             ...item,
             answers: {
@@ -200,7 +255,8 @@ function reducer(state: ChatState, action: Action): ChatState {
       return {
         ...state,
         items: state.items.map((item) => {
-          if (item.id !== action.itemId || item.type !== "clarification") return item;
+          if (item.id !== action.itemId || item.type !== "clarification")
+            return item;
           const current = item.answers[action.questionId];
           if (!current) return item;
           return {
@@ -234,7 +290,12 @@ function reducer(state: ChatState, action: Action): ChatState {
             ? {
                 ...item,
                 confirmedIds: item.questions
-                  .filter((question) => validStoredAnswer(question, item.answers[question.question_id]))
+                  .filter((question) =>
+                    validStoredAnswer(
+                      question,
+                      item.answers[question.question_id],
+                    ),
+                  )
                   .map((question) => question.question_id),
                 submitted: true,
               }
@@ -242,17 +303,24 @@ function reducer(state: ChatState, action: Action): ChatState {
         ),
       };
     case "RECONCILE_WAITING": {
-      const existingIndex = state.items.findLastIndex((item) => item.type === "clarification");
-      const lastUserIndex = state.items.findLastIndex((item) => item.type === "user");
-      const existing = existingIndex > lastUserIndex
-        ? (state.items[existingIndex] as ClarificationItem)
-        : undefined;
+      const existingIndex = state.items.findLastIndex(
+        (item) => item.type === "clarification",
+      );
+      const lastUserIndex = state.items.findLastIndex(
+        (item) => item.type === "user",
+      );
+      const existing =
+        existingIndex > lastUserIndex
+          ? (state.items[existingIndex] as ClarificationItem)
+          : undefined;
       const clarification = reconcileClarification(existing, action.questions);
       const items = state.items.filter(
         (item) => !(item.type === "assistant" && item.streaming && !item.text),
       );
       if (existing) {
-        const currentIndex = items.findIndex((item) => item.id === existing?.id);
+        const currentIndex = items.findIndex(
+          (item) => item.id === existing?.id,
+        );
         if (currentIndex >= 0) items[currentIndex] = clarification;
         else items.push(clarification);
       } else {
@@ -266,9 +334,13 @@ function reducer(state: ChatState, action: Action): ChatState {
         (item) => !(item.type === "assistant" && item.streaming && !item.text),
       );
       const lastUser = items.findLastIndex((item) => item.type === "user");
-      const lastClarification = items.findLastIndex((item) => item.type === "clarification");
+      const lastClarification = items.findLastIndex(
+        (item) => item.type === "clarification",
+      );
       const boundary = Math.max(lastUser, lastClarification);
-      const lastAssistant = items.findLastIndex((item) => item.type === "assistant");
+      const lastAssistant = items.findLastIndex(
+        (item) => item.type === "assistant",
+      );
       if (lastAssistant > boundary) {
         items[lastAssistant] = {
           ...(items[lastAssistant] as AssistantItem),
@@ -277,7 +349,12 @@ function reducer(state: ChatState, action: Action): ChatState {
           streaming: false,
         };
       } else {
-        items.push({ id: createId(), type: "assistant", text: action.answer, products });
+        items.push({
+          id: createId(),
+          type: "assistant",
+          text: action.answer,
+          products,
+        });
       }
       return { ...state, items, phase: "idle", progress: null, error: null };
     }
@@ -288,16 +365,18 @@ function reducer(state: ChatState, action: Action): ChatState {
         progress: null,
         error: action.message,
         items: action.assistantId
-          ? state.items.filter(
-              (item) =>
-                item.id !== action.assistantId ||
-                item.type !== "assistant" ||
-                Boolean(item.text),
-            ).map((item) =>
-              item.id === action.assistantId && item.type === "assistant"
-                ? { ...item, streaming: false }
-                : item,
-            )
+          ? state.items
+              .filter(
+                (item) =>
+                  item.id !== action.assistantId ||
+                  item.type !== "assistant" ||
+                  Boolean(item.text),
+              )
+              .map((item) =>
+                item.id === action.assistantId && item.type === "assistant"
+                  ? { ...item, streaming: false }
+                  : item,
+              )
           : state.items,
       };
     case "CLEAR_ERROR":
@@ -319,12 +398,17 @@ const progressLabels: Record<string, string> = {
 
 function messageFromError(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 409) return "Cuộc trò chuyện đang được xử lý hoặc chưa sẵn sàng.";
-    if (error.status === 404) return "Không tìm thấy cuộc trò chuyện này trên server.";
+    if (error.status === 409)
+      return "Cuộc trò chuyện đang được xử lý hoặc chưa sẵn sàng.";
+    if (error.status === 404)
+      return "Không tìm thấy cuộc trò chuyện này trên server.";
     if (error.status === 422) return error.message;
   }
-  if (error instanceof Error && error.name === "AbortError") return "Yêu cầu đã bị hủy.";
-  return error instanceof Error ? error.message : "Không thể kết nối tới Product Advisor.";
+  if (error instanceof Error && error.name === "AbortError")
+    return "Yêu cầu đã bị hủy.";
+  return error instanceof Error
+    ? error.message
+    : "Không thể kết nối tới Product Advisor.";
 }
 
 function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
@@ -365,10 +449,16 @@ function ProductCard({ product }: { product: SelectedProduct }) {
   const promotional = finitePrice(product.promotional_price_vnd)
     ? product.promotional_price_vnd
     : null;
-  const original = finitePrice(product.original_price_vnd) ? product.original_price_vnd : null;
-  const effective = finitePrice(product.effective_price_vnd) ? product.effective_price_vnd : null;
+  const original = finitePrice(product.original_price_vnd)
+    ? product.original_price_vnd
+    : null;
+  const effective = finitePrice(product.effective_price_vnd)
+    ? product.effective_price_vnd
+    : null;
   const currentPrice = promotional ?? effective ?? original;
-  const imageUrl = product.image_url || resolveProductImageUrl(product.image_path);
+  const image = product.image_url || product.image_path;
+
+  const imageUrl = image ? image.replace(/^\/public/, "") : undefined;
 
   return (
     <article className="product-card">
@@ -385,21 +475,29 @@ function ProductCard({ product }: { product: SelectedProduct }) {
       <div className="product-content">
         <div className="product-heading">
           <h3>{product.name || product.product_id}</h3>
-          {product.name ? <span className="product-id">{product.product_id}</span> : null}
+          {product.name ? (
+            <span className="product-id">{product.product_id}</span>
+          ) : null}
         </div>
         {currentPrice !== null ? (
           <div className="product-price">
             <strong>{formatPrice(currentPrice)}</strong>
-            {promotional !== null && original !== null && original !== promotional ? (
+            {promotional !== null &&
+            original !== null &&
+            original !== promotional ? (
               <del>{formatPrice(original)}</del>
             ) : null}
           </div>
         ) : null}
         {product.reason ? (
-          <p><span>Phù hợp:</span> {product.reason}</p>
+          <p>
+            <span>Phù hợp:</span> {product.reason}
+          </p>
         ) : null}
         {product.trade_off ? (
-          <p className="trade-off"><span>Đánh đổi:</span> {product.trade_off}</p>
+          <p className="trade-off">
+            <span>Đánh đổi:</span> {product.trade_off}
+          </p>
         ) : null}
       </div>
     </article>
@@ -428,13 +526,19 @@ function ClarificationCard({
     const answer = item.answers[question.question_id];
     if (!answer) return "";
     if (answer.option_id === "other") return answer.custom_answer?.trim() || "";
-    return question.options.find((option) => option.option_id === answer.option_id)?.label || "";
+    return (
+      question.options.find((option) => option.option_id === answer.option_id)
+        ?.label || ""
+    );
   };
 
-  const currentAnswer = activeQuestion ? item.answers[activeQuestion.question_id] : undefined;
+  const currentAnswer = activeQuestion
+    ? item.answers[activeQuestion.question_id]
+    : undefined;
   const currentValid = Boolean(
     currentAnswer &&
-      (currentAnswer.option_id !== "other" || currentAnswer.custom_answer?.trim()),
+    (currentAnswer.option_id !== "other" ||
+      currentAnswer.custom_answer?.trim()),
   );
 
   const answersWith = (answer: ClarificationAnswer): ClarificationAnswer[] =>
@@ -447,7 +551,10 @@ function ClarificationCard({
       .filter((value): value is ClarificationAnswer => Boolean(value));
 
   const selectOption = (questionId: string, optionId: string) => {
-    const answer: ClarificationAnswer = { question_id: questionId, option_id: optionId };
+    const answer: ClarificationAnswer = {
+      question_id: questionId,
+      option_id: optionId,
+    };
     onSelect(questionId, optionId);
     if (optionId === "other") return;
     if (activeIndex === item.questions.length - 1) {
@@ -473,14 +580,18 @@ function ClarificationCard({
       {item.questions.slice(0, activeIndex).map((question) => (
         <div className="confirmed-answer" key={question.question_id}>
           <span aria-hidden="true">✓</span>
-          <div><strong>{question.question}</strong> — {answerText(question)}</div>
+          <div>
+            <strong>{question.question}</strong> — {answerText(question)}
+          </div>
         </div>
       ))}
 
       {activeQuestion && !item.submitted ? (
         <fieldset className="question-fieldset" disabled={disabled}>
           <legend>{activeQuestion.question}</legend>
-          <div className="question-count">Câu {activeIndex + 1}/{item.questions.length}</div>
+          <div className="question-count">
+            Câu {activeIndex + 1}/{item.questions.length}
+          </div>
           <div className="option-list">
             {activeQuestion.options.map((option) => (
               <label
@@ -492,7 +603,9 @@ function ClarificationCard({
                   name={activeQuestion.question_id}
                   value={option.option_id}
                   checked={currentAnswer?.option_id === option.option_id}
-                  onChange={() => selectOption(activeQuestion.question_id, option.option_id)}
+                  onChange={() =>
+                    selectOption(activeQuestion.question_id, option.option_id)
+                  }
                 />
                 <span>{option.label}</span>
               </label>
@@ -504,7 +617,9 @@ function ClarificationCard({
               <input
                 type="text"
                 value={currentAnswer.custom_answer || ""}
-                onChange={(event) => onCustomAnswer(activeQuestion.question_id, event.target.value)}
+                onChange={(event) =>
+                  onCustomAnswer(activeQuestion.question_id, event.target.value)
+                }
                 placeholder="Nhập câu trả lời…"
                 autoFocus
               />
@@ -522,7 +637,9 @@ function ClarificationCard({
           ) : null}
         </fieldset>
       ) : null}
-      {item.submitted ? <div className="submitted-note">✓ Đã gửi câu trả lời</div> : null}
+      {item.submitted ? (
+        <div className="submitted-note">✓ Đã gửi câu trả lời</div>
+      ) : null}
     </section>
   );
 }
@@ -535,40 +652,57 @@ export default function App() {
   const endRef = useRef<HTMLDivElement | null>(null);
   const initialThreadId = useRef(state.threadId);
 
-  const restoreThread = useCallback(async (threadId: string, signal: AbortSignal) => {
-    dispatch({ type: "SET_PHASE", phase: "restoring", progress: "Đang khôi phục cuộc trò chuyện…" });
-    try {
-      for (let attempt = 0; attempt < 30; attempt += 1) {
-        const status = await getThreadStatus(threadId, signal);
-        if (status.status === "waiting_for_clarification") {
-          dispatch({ type: "RECONCILE_WAITING", questions: status.questions });
-          return;
-        }
-        if (status.status === "completed") {
+  const restoreThread = useCallback(
+    async (threadId: string, signal: AbortSignal) => {
+      dispatch({
+        type: "SET_PHASE",
+        phase: "restoring",
+        progress: "Đang khôi phục cuộc trò chuyện…",
+      });
+      try {
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          const status = await getThreadStatus(threadId, signal);
+          if (status.status === "waiting_for_clarification") {
+            dispatch({
+              type: "RECONCILE_WAITING",
+              questions: status.questions,
+            });
+            return;
+          }
+          if (status.status === "completed") {
+            dispatch({
+              type: "RECONCILE_COMPLETED",
+              answer: status.answer || "",
+              products: status.selected_products || [],
+            });
+            return;
+          }
           dispatch({
-            type: "RECONCILE_COMPLETED",
-            answer: status.answer || "",
-            products: status.selected_products || [],
+            type: "SET_PROGRESS",
+            progress: "Cuộc trò chuyện vẫn đang được xử lý…",
+          });
+          await wait(2_000, signal);
+        }
+        dispatch({
+          type: "REQUEST_FAILED",
+          message:
+            "Server vẫn đang xử lý lâu hơn dự kiến. Bạn có thể kiểm tra lại trạng thái.",
+        });
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+        if (error instanceof ApiError && error.status === 404) {
+          localStorage.removeItem(STORAGE_KEY);
+          dispatch({
+            type: "RESET",
+            message: "Phiên đã lưu không còn tồn tại trên server.",
           });
           return;
         }
-        dispatch({ type: "SET_PROGRESS", progress: "Cuộc trò chuyện vẫn đang được xử lý…" });
-        await wait(2_000, signal);
+        dispatch({ type: "REQUEST_FAILED", message: messageFromError(error) });
       }
-      dispatch({
-        type: "REQUEST_FAILED",
-        message: "Server vẫn đang xử lý lâu hơn dự kiến. Bạn có thể kiểm tra lại trạng thái.",
-      });
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") return;
-      if (error instanceof ApiError && error.status === 404) {
-        localStorage.removeItem(STORAGE_KEY);
-        dispatch({ type: "RESET", message: "Phiên đã lưu không còn tồn tại trên server." });
-        return;
-      }
-      dispatch({ type: "REQUEST_FAILED", message: messageFromError(error) });
-    }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
     const threadId = initialThreadId.current;
@@ -586,7 +720,11 @@ export default function App() {
     try {
       localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ version: 1, threadId: state.threadId, items: state.items }),
+        JSON.stringify({
+          version: 1,
+          threadId: state.threadId,
+          items: state.items,
+        }),
       );
     } catch {
       // The live conversation remains usable when browser storage is unavailable.
@@ -600,10 +738,17 @@ export default function App() {
   useEffect(() => () => activeRequest.current?.abort(), []);
 
   const activeClarification = useMemo(
-    () => state.items.findLast((item): item is ClarificationItem => item.type === "clarification" && !item.submitted),
+    () =>
+      state.items.findLast(
+        (item): item is ClarificationItem =>
+          item.type === "clarification" && !item.submitted,
+      ),
     [state.items],
   );
-  const busy = state.phase === "sending" || state.phase === "resuming" || state.phase === "restoring";
+  const busy =
+    state.phase === "sending" ||
+    state.phase === "resuming" ||
+    state.phase === "restoring";
   const canSend = state.phase === "idle" && !activeClarification;
 
   const handleStreamEvent = (
@@ -618,16 +763,27 @@ export default function App() {
         dispatch({ type: "SET_THREAD", threadId: event.data.thread_id });
         break;
       case "progress":
-        dispatch({ type: "SET_PROGRESS", progress: progressLabels[event.data.stage] || "Đang xử lý…" });
+        dispatch({
+          type: "SET_PROGRESS",
+          progress: progressLabels[event.data.stage] || "Đang xử lý…",
+        });
         break;
       case "token":
-        dispatch({ type: "APPEND_TOKEN", id: assistantId, delta: event.data.delta });
+        dispatch({
+          type: "APPEND_TOKEN",
+          id: assistantId,
+          delta: event.data.delta,
+        });
         break;
       case "clarification_required":
         markTerminal();
         rememberThread(event.data.thread_id);
         dispatch({ type: "SET_THREAD", threadId: event.data.thread_id });
-        dispatch({ type: "ADD_CLARIFICATION", assistantId, questions: event.data.questions });
+        dispatch({
+          type: "ADD_CLARIFICATION",
+          assistantId,
+          questions: event.data.questions,
+        });
         break;
       case "completed":
         markTerminal();
@@ -657,12 +813,25 @@ export default function App() {
     const assistantId = createId();
     let activeThreadId = state.threadId;
     let terminal = false;
-    dispatch({ type: "ADD_USER", item: { id: createId(), type: "user", text: trimmed } });
+    dispatch({
+      type: "ADD_USER",
+      item: { id: createId(), type: "user", text: trimmed },
+    });
     dispatch({
       type: "ADD_ASSISTANT",
-      item: { id: assistantId, type: "assistant", text: "", products: [], streaming: true },
+      item: {
+        id: assistantId,
+        type: "assistant",
+        text: "",
+        products: [],
+        streaming: true,
+      },
     });
-    dispatch({ type: "SET_PHASE", phase: "sending", progress: "Đang hiểu nhu cầu…" });
+    dispatch({
+      type: "SET_PHASE",
+      phase: "sending",
+      progress: "Đang hiểu nhu cầu…",
+    });
     setMessage("");
 
     try {
@@ -673,16 +842,26 @@ export default function App() {
           handleStreamEvent(
             sseEvent,
             assistantId,
-            () => { terminal = true; },
-            (threadId) => { activeThreadId = threadId; },
+            () => {
+              terminal = true;
+            },
+            (threadId) => {
+              activeThreadId = threadId;
+            },
           ),
         controller.signal,
       );
-      if (!terminal) throw new Error("Stream kết thúc trước khi có kết quả cuối.");
+      if (!terminal)
+        throw new Error("Stream kết thúc trước khi có kết quả cuối.");
     } catch (error) {
       if (!(error instanceof Error && error.name === "AbortError")) {
-        dispatch({ type: "REQUEST_FAILED", assistantId, message: messageFromError(error) });
-        if (activeThreadId) dispatch({ type: "SET_THREAD", threadId: activeThreadId });
+        dispatch({
+          type: "REQUEST_FAILED",
+          assistantId,
+          message: messageFromError(error),
+        });
+        if (activeThreadId)
+          dispatch({ type: "SET_THREAD", threadId: activeThreadId });
       }
     } finally {
       requestInFlight.current = false;
@@ -705,9 +884,19 @@ export default function App() {
     dispatch({ type: "MARK_SUBMITTED", itemId: item.id });
     dispatch({
       type: "ADD_ASSISTANT",
-      item: { id: assistantId, type: "assistant", text: "", products: [], streaming: true },
+      item: {
+        id: assistantId,
+        type: "assistant",
+        text: "",
+        products: [],
+        streaming: true,
+      },
     });
-    dispatch({ type: "SET_PHASE", phase: "resuming", progress: "Đang tìm sản phẩm…" });
+    dispatch({
+      type: "SET_PHASE",
+      phase: "resuming",
+      progress: "Đang tìm sản phẩm…",
+    });
 
     try {
       await resumeChat(
@@ -715,21 +904,30 @@ export default function App() {
         answers.map((answer) => ({
           question_id: answer.question_id,
           option_id: answer.option_id,
-          ...(answer.option_id === "other" ? { custom_answer: answer.custom_answer?.trim() } : {}),
+          ...(answer.option_id === "other"
+            ? { custom_answer: answer.custom_answer?.trim() }
+            : {}),
         })),
         (sseEvent) =>
           handleStreamEvent(
             sseEvent,
             assistantId,
-            () => { terminal = true; },
+            () => {
+              terminal = true;
+            },
             () => undefined,
           ),
         controller.signal,
       );
-      if (!terminal) throw new Error("Stream kết thúc trước khi có kết quả cuối.");
+      if (!terminal)
+        throw new Error("Stream kết thúc trước khi có kết quả cuối.");
     } catch (error) {
       if (!(error instanceof Error && error.name === "AbortError")) {
-        dispatch({ type: "REQUEST_FAILED", assistantId, message: messageFromError(error) });
+        dispatch({
+          type: "REQUEST_FAILED",
+          assistantId,
+          message: messageFromError(error),
+        });
       }
     } finally {
       requestInFlight.current = false;
@@ -774,14 +972,21 @@ export default function App() {
     <div className="app-shell">
       <header className="app-header">
         <div className="brand">
-          <div className="brand-mark" aria-hidden="true">P</div>
+          <div className="brand-mark" aria-hidden="true">
+            P
+          </div>
           <div>
             <strong>Product Advisor</strong>
             <span>Tư vấn sản phẩm theo nhu cầu</span>
           </div>
         </div>
         {state.threadId ? (
-          <button className="new-chat-button" type="button" disabled={busy} onClick={startNewConversation}>
+          <button
+            className="new-chat-button"
+            type="button"
+            disabled={busy}
+            onClick={startNewConversation}
+          >
             Cuộc trò chuyện mới
           </button>
         ) : null}
@@ -791,27 +996,45 @@ export default function App() {
         <div className="conversation" aria-live="polite">
           {state.items.length === 0 ? (
             <section className="welcome-card">
-              <div className="welcome-icon" aria-hidden="true">✦</div>
+              <div className="welcome-icon" aria-hidden="true">
+                ✦
+              </div>
               <h1>Bạn đang tìm sản phẩm nào?</h1>
-              <p>Hãy mô tả nhu cầu, ngân sách hoặc điều bạn quan tâm. Mình sẽ giúp bạn thu hẹp lựa chọn.</p>
+              <p>
+                Hãy mô tả nhu cầu, ngân sách hoặc điều bạn quan tâm. Mình sẽ
+                giúp bạn thu hẹp lựa chọn.
+              </p>
             </section>
           ) : null}
 
           {state.items.map((item) => {
             if (item.type === "user") {
-              return <div className="message-row user-row" key={item.id}><div className="message user-message">{item.text}</div></div>;
+              return (
+                <div className="message-row user-row" key={item.id}>
+                  <div className="message user-message">{item.text}</div>
+                </div>
+              );
             }
             if (item.type === "assistant") {
               if (!item.text && item.products.length === 0) return null;
               return (
                 <div className="message-row assistant-row" key={item.id}>
-                  <div className="assistant-avatar" aria-hidden="true">P</div>
+                  <div className="assistant-avatar" aria-hidden="true">
+                    P
+                  </div>
                   <div className="assistant-result">
-                    {item.text ? <div className="message assistant-message"><MarkdownText text={item.text} /></div> : null}
+                    {item.text ? (
+                      <div className="message assistant-message">
+                        <MarkdownText text={item.text} />
+                      </div>
+                    ) : null}
                     {item.products.length > 0 ? (
                       <div className="product-list">
                         {item.products.slice(0, 3).map((product) => (
-                          <ProductCard key={product.product_id} product={product} />
+                          <ProductCard
+                            key={product.product_id}
+                            product={product}
+                          />
                         ))}
                       </div>
                     ) : null}
@@ -821,20 +1044,38 @@ export default function App() {
             }
             return (
               <div className="message-row assistant-row" key={item.id}>
-                <div className="assistant-avatar" aria-hidden="true">P</div>
+                <div className="assistant-avatar" aria-hidden="true">
+                  P
+                </div>
                 <ClarificationCard
                   item={item}
                   disabled={busy || item.submitted}
                   onSelect={(questionId, optionId) =>
-                    dispatch({ type: "SELECT_OPTION", itemId: item.id, questionId, optionId })
+                    dispatch({
+                      type: "SELECT_OPTION",
+                      itemId: item.id,
+                      questionId,
+                      optionId,
+                    })
                   }
                   onCustomAnswer={(questionId, value) =>
-                    dispatch({ type: "SET_CUSTOM_ANSWER", itemId: item.id, questionId, value })
+                    dispatch({
+                      type: "SET_CUSTOM_ANSWER",
+                      itemId: item.id,
+                      questionId,
+                      value,
+                    })
                   }
                   onConfirm={(questionId) =>
-                    dispatch({ type: "CONFIRM_ANSWER", itemId: item.id, questionId })
+                    dispatch({
+                      type: "CONFIRM_ANSWER",
+                      itemId: item.id,
+                      questionId,
+                    })
                   }
-                  onSubmit={(answers) => void submitClarification(item, answers)}
+                  onSubmit={(answers) =>
+                    void submitClarification(item, answers)
+                  }
                 />
               </div>
             );
@@ -849,8 +1090,18 @@ export default function App() {
 
           {state.error ? (
             <div className="error-banner" role="alert">
-              <div><strong>Chưa thể hoàn tất yêu cầu</strong><span>{state.error}</span></div>
-              <button type="button" onClick={state.threadId ? checkStatus : () => dispatch({ type: "CLEAR_ERROR" })}>
+              <div>
+                <strong>Chưa thể hoàn tất yêu cầu</strong>
+                <span>{state.error}</span>
+              </div>
+              <button
+                type="button"
+                onClick={
+                  state.threadId
+                    ? checkStatus
+                    : () => dispatch({ type: "CLEAR_ERROR" })
+                }
+              >
                 {state.threadId ? "Kiểm tra trạng thái" : "Đóng"}
               </button>
             </div>
@@ -860,7 +1111,10 @@ export default function App() {
       </main>
 
       <footer className="composer-shell">
-        <form className="composer" onSubmit={(event) => void sendMessage(event)}>
+        <form
+          className="composer"
+          onSubmit={(event) => void sendMessage(event)}
+        >
           <textarea
             value={message}
             onChange={(event) => setMessage(event.target.value)}
@@ -871,7 +1125,12 @@ export default function App() {
             disabled={!canSend}
             aria-label="Tin nhắn"
           />
-          <button className="send-button" type="submit" disabled={!canSend || !message.trim()} aria-label="Gửi tin nhắn">
+          <button
+            className="send-button"
+            type="submit"
+            disabled={!canSend || !message.trim()}
+            aria-label="Gửi tin nhắn"
+          >
             Gửi
           </button>
         </form>

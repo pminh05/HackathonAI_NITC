@@ -67,3 +67,16 @@ def test_settings_read_fake_environment(monkeypatch) -> None:
     assert settings.app_env == "test"
     assert settings.log_level == "DEBUG"
     assert settings.gemini_model == "test-model"
+
+
+def test_public_frontend_origin_is_included_in_cors() -> None:
+    settings = ApplicationSettings(
+        _env_file=None,
+        api_cors_origins="http://localhost:5173",
+        api_public_frontend_url="https://example.vercel.app/",
+    )
+
+    assert settings.cors_origins == [
+        "http://localhost:5173",
+        "https://example.vercel.app",
+    ]

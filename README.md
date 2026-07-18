@@ -16,11 +16,11 @@ Tài liệu HTTP API, SSE và Human-in-the-loop: [docs/API.md](docs/API.md).
 
 Backend và frontend chạy thành hai process riêng:
 
-| Thành phần | URL mặc định |
-| --- | --- |
-| FastAPI | `http://127.0.0.1:8000` |
+| Thành phần | URL mặc định                 |
+| ---------- | ---------------------------- |
+| FastAPI    | `http://127.0.0.1:8000`      |
 | Swagger UI | `http://127.0.0.1:8000/docs` |
-| React/Vite | `http://localhost:5173` |
+| React/Vite | `http://localhost:5173`      |
 
 ## Cài đặt và chạy local
 
@@ -130,7 +130,7 @@ curl http://127.0.0.1:8000/healthz
 Kết quả mong đợi:
 
 ```json
-{"status":"ok"}
+{ "status": "ok" }
 ```
 
 ### 4. Cài dependencies và chạy frontend
@@ -234,11 +234,11 @@ Resume cùng thread_id
 Tiếp tục build filter và search
 ```
 
-* Graph programmatic mặc định dùng `InMemorySaver`.
-* FastAPI dùng `AsyncSqliteSaver` và giữ HITL qua restart.
-* Khi cần nhiều worker/replica, thay SQLite bằng PostgreSQL.
-* `user_id`: đại diện cho khách hàng.
-* `thread_id`: đại diện cho từng cuộc hội thoại.
+- Graph programmatic mặc định dùng `InMemorySaver`.
+- FastAPI dùng `AsyncSqliteSaver` và giữ HITL qua restart.
+- Khi cần nhiều worker/replica, thay SQLite bằng PostgreSQL.
+- `user_id`: đại diện cho khách hàng.
+- `thread_id`: đại diện cho từng cuộc hội thoại.
 
 Long-term memory bằng Mem0 chưa được bật. Checkpoint chỉ là short-term memory của
 thread; recommendation cache và clarification không được thiết kế để đưa vào
@@ -257,10 +257,10 @@ Laptop     → products_laptop
 
 Cách chia này giúp:
 
-* Metadata của từng ngành hàng độc lập.
-* Filter đơn giản và ít field rỗng.
-* Dễ re-index từng sheet.
-* Các thành viên có thể làm category riêng, giảm conflict.
+- Metadata của từng ngành hàng độc lập.
+- Filter đơn giản và ít field rỗng.
+- Dễ re-index từng sheet.
+- Các thành viên có thể làm category riêng, giảm conflict.
 
 Các trường chuẩn hóa như giá, dung tích, kích thước và tính năng boolean được dùng
 cho metadata filter. Thương hiệu cùng các trường mô tả dài như công nghệ và tiện
@@ -405,23 +405,23 @@ product-advisor/
 
 ## Vai trò các thành phần
 
-* `graph.py`: định nghĩa node, edge, interrupt và routing.
-* `api.py`: FastAPI, SSE streaming, thread validation và HITL resume.
-* `state.py`: định nghĩa LangGraph state.
-* `nodes.py`: logic dùng chung như intent, profile extraction, HITL, retrieval, ranking và response.
-* `schemas.py`: schema cho state, form câu hỏi và structured output.
-* `config.yaml`: collection, required fields và metadata mapping của từng category.
-* `prompts.py`: prompt hỏi lại và prompt tư vấn.
-* `filter_builder.py`: chuyển `need_profile` thành Qdrant filter.
-* `base.py`: contract hành vi bắt buộc của mọi category (`CategorySpec`).
-* `registry.py`: lazy-load và validate category spec theo module tương ứng.
-* `retrieval/qdrant.py`: kết nối và truy vấn Qdrant.
-* `persistence/checkpointer.py`: cấu hình persistence.
-* `memory/mem0.py`: placeholder cho long-term memory.
-* `tests/categories/`: test rule, filter và output theo từng ngành hàng.
-* `frontend/src/App.tsx`: reducer, chat UI, clarification flow và local persistence.
-* `frontend/src/api.ts`: HTTP client và SSE parser cho POST stream.
-* `frontend/src/styles.css`: giao diện desktop không phụ thuộc UI framework.
+- `graph.py`: định nghĩa node, edge, interrupt và routing.
+- `api.py`: FastAPI, SSE streaming, thread validation và HITL resume.
+- `state.py`: định nghĩa LangGraph state.
+- `nodes.py`: logic dùng chung như intent, profile extraction, HITL, retrieval, ranking và response.
+- `schemas.py`: schema cho state, form câu hỏi và structured output.
+- `config.yaml`: collection, required fields và metadata mapping của từng category.
+- `prompts.py`: prompt hỏi lại và prompt tư vấn.
+- `filter_builder.py`: chuyển `need_profile` thành Qdrant filter.
+- `base.py`: contract hành vi bắt buộc của mọi category (`CategorySpec`).
+- `registry.py`: lazy-load và validate category spec theo module tương ứng.
+- `retrieval/qdrant.py`: kết nối và truy vấn Qdrant.
+- `persistence/checkpointer.py`: cấu hình persistence.
+- `memory/mem0.py`: placeholder cho long-term memory.
+- `tests/categories/`: test rule, filter và output theo từng ngành hàng.
+- `frontend/src/App.tsx`: reducer, chat UI, clarification flow và local persistence.
+- `frontend/src/api.ts`: HTTP client và SSE parser cho POST stream.
+- `frontend/src/styles.css`: giao diện desktop không phụ thuộc UI framework.
 
 ## Mở rộng category mới
 

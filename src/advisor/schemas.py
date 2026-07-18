@@ -31,6 +31,9 @@ class ApplicationSettings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     api_cors_origins: str = "http://localhost:3000,http://localhost:5173"
+    api_public_frontend_url: str | None = (
+        "https://hackathon-ai-nitc-eight.vercel.app"
+    )
     sse_heartbeat_seconds: float = 15.0
 
     model_config = SettingsConfigDict(
@@ -41,7 +44,13 @@ class ApplicationSettings(BaseSettings):
 
     @property
     def cors_origins(self) -> list[str]:
-        return [item.strip() for item in self.api_cors_origins.split(",") if item.strip()]
+        origins = [
+            item.strip() for item in self.api_cors_origins.split(",") if item.strip()
+        ]
+        public_origin = (self.api_public_frontend_url or "").strip().rstrip("/")
+        if public_origin and public_origin not in origins:
+            origins.append(public_origin)
+        return origins
 
 
 class IntentLabel(StrEnum):
