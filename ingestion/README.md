@@ -114,6 +114,44 @@ Collection `mayruachen` dùng UUID ổn định và metadata canonical cho loạ
 thước. `category_scope` tách máy rửa chén khỏi sản phẩm máy sấy chén nằm chung
 trong dữ liệu nguồn.
 
+Máy nước nóng dùng Qdrant Cloud Inference và metadata canonical:
+
+```powershell
+python may_nuoc_nong/processing.py
+python may_nuoc_nong/changeName.py
+python may_nuoc_nong/dictionary.py
+python may_nuoc_nong/qdrant.py
+```
+
+Collection `maynuocnong` dùng UUID ổn định, Qdrant Cloud Inference và vector
+cosine 384 chiều. Giá VND được parse từ cột hiển thị thay vì cột sinh sai hệ số;
+áp lực nước được chuẩn hóa từ Bar/kPa/MPa. Metadata canonical gồm loại làm nóng,
+giá, dung tích, công suất, thời gian làm nóng, bơm trợ lực, vòi sen, IP, safety
+tags và kích thước cm.
+
+Tủ mát và tủ đông dùng pipeline local embedding đầy đủ:
+
+```powershell
+python tu_mat_tu_dong/processing.py
+python tu_mat_tu_dong/changeName.py
+python tu_mat_tu_dong/dictionary.py
+python tu_mat_tu_dong/embedding.py
+python tu_mat_tu_dong/qdrant.py
+```
+
+Nếu collection đã có vector nhưng payload còn theo schema cũ, có thể cập nhật
+payload canonical mà không cần chạy lại embedding:
+
+```powershell
+python tu_mat_tu_dong/qdrant.py --reuse-existing-vectors
+```
+
+Collection `tumattudong` dùng UUID ổn định và vector cosine 384 chiều. Metadata
+canonical tách `product_family` thành `cooler`/`freezer`, giữ loại mini, giá hiệu
+lực, dung tích, nhiệt độ, Inverter, gas, kích thước và các `feature_tags` có thể
+lọc. Hai family dùng chung collection nhưng luôn được lọc bằng metadata khi nhu
+cầu người dùng đã xác định loại tủ.
+
 Máy sấy quần áo dùng pipeline local embedding đầy đủ:
 
 ```powershell
