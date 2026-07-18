@@ -1,0 +1,118 @@
+category: cooler_freezer
+display_name: Tủ mát, tủ đông
+collection: tumattudong
+embedding_model: intfloat/multilingual-e5-small
+retrieval_limit: 12
+
+required_profile_fields:
+  - product_family
+  - budget
+  - usage_preferences
+
+payload_fields:
+  product_family: metadata.product_family
+  product_type: metadata.product_type
+  is_mini: metadata.is_mini
+  brand: metadata.brand
+  effective_price: metadata.effective_price_vnd
+  capacity: metadata.total_capacity_lit
+  temperature_min: metadata.temperature_min_c
+  inverter: metadata.has_inverter
+  gas_type: metadata.gas_type
+  feature_tags: metadata.feature_tags
+  width: metadata.width_cm
+  height: metadata.height_cm
+  depth: metadata.depth_cm
+
+payload_indexes:
+  metadata.product_family: keyword
+  metadata.product_type: keyword
+  metadata.is_mini: bool
+  metadata.brand: keyword
+  metadata.effective_price_vnd: integer
+  metadata.total_capacity_lit: integer
+  metadata.temperature_min_c: float
+  metadata.has_inverter: bool
+  metadata.gas_type: keyword
+  metadata.feature_tags: keyword
+  metadata.width_cm: float
+  metadata.height_cm: float
+  metadata.depth_cm: float
+
+question_catalog:
+  product_family:
+    question_type: explicit
+    question: Bạn cần tủ mát, tủ đông hay muốn xem cả hai loại?
+    options:
+      - option_id: cooler
+        label: Tủ mát
+        profile_updates: {product_family: cooler}
+      - option_id: freezer
+        label: Tủ đông
+        profile_updates: {product_family: freezer}
+      - option_id: open
+        label: Chưa xác định – xem cả hai loại
+        profile_updates: {product_family: open}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  budget:
+    question_type: explicit
+    question: Ngân sách tối đa bạn dự kiến dành cho tủ là bao nhiêu?
+    options:
+      - option_id: under_8m
+        label: Dưới 8 triệu đồng
+        profile_updates: {budget_max_vnd: 8000000}
+      - option_id: 8m_15m
+        label: Khoảng 8–15 triệu đồng
+        profile_updates: {budget_max_vnd: 15000000}
+      - option_id: 15m_30m
+        label: Khoảng 15–30 triệu đồng
+        profile_updates: {budget_max_vnd: 30000000}
+      - option_id: over_30m
+        label: Trên 30 triệu đồng
+        profile_updates:
+          budget_segment: premium
+          soft_preferences: [premium]
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  usage_preferences:
+    question_type: implicit
+    question: Nhu cầu bảo quản nào quan trọng nhất với bạn?
+    options:
+      - option_id: display_drinks
+        label: Trưng bày và làm mát đồ uống
+        profile_updates:
+          usage_preferences: [display_drinks]
+          soft_preferences: [glass_door, led_light, even_cooling]
+      - option_id: fresh_food_cooling
+        label: Giữ thực phẩm tươi ở nhiệt độ mát
+        profile_updates:
+          usage_preferences: [fresh_food_cooling]
+          implicit_needs: [stable_cooling, easy_organization]
+      - option_id: bulk_frozen_storage
+        label: Trữ đông thịt cá dài ngày
+        profile_updates:
+          usage_preferences: [bulk_frozen_storage]
+          implicit_needs: [deep_freezing, large_capacity]
+      - option_id: commercial_storage
+        label: Kinh doanh hoặc cần sức chứa lớn
+        profile_updates:
+          usage_preferences: [commercial_storage]
+          soft_preferences: [large_capacity, durable_operation]
+      - option_id: convertible_use
+        label: Muốn chuyển đổi linh hoạt mát/đông
+        profile_updates:
+          usage_preferences: [convertible_use]
+          soft_preferences: [convertible_mode]
+      - option_id: energy_saving
+        label: Ưu tiên tiết kiệm điện và vận hành lâu dài
+        profile_updates:
+          usage_preferences: [energy_saving]
+          soft_preferences: [energy_saving, inverter, low_noise]
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}

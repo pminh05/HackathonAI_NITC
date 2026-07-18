@@ -136,4 +136,20 @@ def build_default_registry() -> CategoryRegistry:
             config_path=Path(__file__).with_name("dishwasher") / "config.yaml",
         )
     )
+    registry.register(
+        CategoryDefinition(
+            name="cooler_freezer",
+            display_name="Tủ mát, tủ đông",
+            package_path="advisor.categories.cooler_freezer",
+            config_path=Path(__file__).with_name("cooler_freezer") / "config.yaml",
+        )
+    )
+    registry.register(
+        CategoryDefinition(
+            name="water_heater",
+            display_name="Máy nước nóng",
+            package_path="advisor.categories.water_heater",
+            config_path=Path(__file__).with_name("water_heater") / "config.yaml",
+        )
+    )
     return registry

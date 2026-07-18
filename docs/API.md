@@ -1,8 +1,8 @@
 # Product Advisor API
 
-Tài liệu này mô tả HTTP API tư vấn tủ lạnh, máy lạnh, máy giặt, máy sấy quần áo
-và máy rửa chén. API dùng FastAPI, lưu trạng thái hội thoại theo `thread_id` và
-trả kết quả chat bằng Server-Sent Events (SSE).
+Tài liệu này mô tả HTTP API tư vấn tủ lạnh, máy lạnh, máy giặt, máy sấy quần áo,
+máy rửa chén, tủ mát, tủ đông và máy nước nóng. API dùng FastAPI, lưu trạng thái
+hội thoại theo `thread_id` và trả kết quả chat bằng Server-Sent Events (SSE).
 
 ## 1. Chạy dịch vụ
 
@@ -340,6 +340,22 @@ Catalog máy rửa chén hỗ trợ:
 | `installation` | `freestanding`, `built_in`, `semi_integrated`, `mini`, `flexible`, `other` |
 | `capacity` | `compact`, `standard`, `large`, `open`, `other` |
 | `budget` | `under_12m`, `12m_18m`, `18m_25m`, `over_25m`, `other` |
+
+Catalog tủ mát, tủ đông hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `product_family` | `cooler`, `freezer`, `open`, `other` |
+| `budget` | `under_8m`, `8m_15m`, `15m_30m`, `over_30m`, `other` |
+| `usage_preferences` | `display_drinks`, `fresh_food_cooling`, `bulk_frozen_storage`, `commercial_storage`, `convertible_use`, `energy_saving`, `other` |
+
+Catalog máy nước nóng hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `heater_type` | `direct`, `indirect`, `solar`, `direct_multipoint`, `flexible`, `other` |
+| `water_supply` | `stable`, `low_pressure`, `multi_outlet`, `open`, `other` |
+| `budget` | `under_3m`, `3m_5m`, `5m_9m`, `over_9m`, `other` |
 
 Client vẫn nên render theo `questions[].options` từ response thay vì phụ thuộc vào bảng này, vì catalog có thể thay đổi.
 

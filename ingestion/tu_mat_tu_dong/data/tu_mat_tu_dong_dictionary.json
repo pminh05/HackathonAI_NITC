@@ -1,19 +1,42 @@
 {
   "dataset": "tu_mat_tu_dong",
-  "category": "tủ mát tủ đông",
+  "category": "tủ mát, tủ đông",
   "fields": {
-    "Loại sản phẩm": {
-      "description": "Các giá trị loại sản phẩm dùng để tìm kiếm, lọc và hiểu sản phẩm tủ mát tủ đông.",
+    "product_type": {
+      "description": "Loại canonical của tủ mát hoặc tủ đông.",
       "data_type": "string",
       "possible_values": [
-        "Tủ mát",
-        "Tủ mát mini",
-        "Tủ đông",
-        "Tủ đông mini"
+        "cooler",
+        "cooler_mini",
+        "freezer",
+        "freezer_mini"
+      ]
+    },
+    "gas_type": {
+      "description": "Loại gas làm lạnh được công bố.",
+      "data_type": "string",
+      "possible_values": [
+        "R134a",
+        "R290",
+        "R600a"
+      ]
+    },
+    "feature_tags": {
+      "description": "Các tính năng canonical dùng cho tìm kiếm và lọc.",
+      "data_type": "string",
+      "possible_values": [
+        "convertible_mode",
+        "drain",
+        "external_temperature_control",
+        "fast_freeze",
+        "glass_door",
+        "led_light",
+        "lock",
+        "wheels"
       ]
     },
     "Công nghệ": {
-      "description": "Các giá trị công nghệ dùng để tìm kiếm, lọc và hiểu sản phẩm tủ mát tủ đông.",
+      "description": "Công nghệ làm lạnh hoặc bảo quản của sản phẩm.",
       "data_type": "string",
       "possible_values": [
         "Công nghệ Extra Freezing",
@@ -39,16 +62,8 @@
         "Đối lưu cưỡng bức"
       ]
     },
-    "Công nghệ tiết kiệm điện": {
-      "description": "Các giá trị công nghệ tiết kiệm điện dùng để tìm kiếm, lọc và hiểu sản phẩm tủ mát tủ đông.",
-      "data_type": "string",
-      "possible_values": [
-        "Inverter",
-        "Smart Inverter"
-      ]
-    },
     "Tiện ích": {
-      "description": "Các giá trị tiện ích dùng để tìm kiếm, lọc và hiểu sản phẩm tủ mát tủ đông.",
+      "description": "Tiện ích sử dụng của tủ mát hoặc tủ đông.",
       "data_type": "string",
       "possible_values": [
         "4 khay đựng",
@@ -86,11 +101,12 @@
       ]
     },
     "Chất liệu mặt": {
-      "description": "Các giá trị chất liệu mặt dùng để tìm kiếm, lọc và hiểu sản phẩm tủ mát tủ đông.",
+      "description": "Vật liệu hoặc kiểu hoàn thiện mặt tủ.",
       "data_type": "string",
       "possible_values": [
         "Có",
         "Công nghệ kính Low-E",
+        "Không",
         "Không có kính",
         "Kính 2 lớp",
         "Kính cách nhiệt Low-E",
@@ -99,13 +115,24 @@
         "Kính cường lực dày 5 mm"
       ]
     },
-    "Loại Gas": {
-      "description": "Các giá trị loại gas dùng để tìm kiếm, lọc và hiểu sản phẩm tủ mát tủ đông.",
+    "Chất liệu ruột": {
+      "description": "Vật liệu bên trong tủ.",
       "data_type": "string",
       "possible_values": [
-        "R134a",
-        "R290",
-        "R600a"
+        "Hợp kim nhôm sơn tĩnh điện",
+        "Hợp kim nhôm sơn tĩnh điện/PCM (Hợp kim thép chống rỉ)",
+        "Nhôm",
+        "Nhôm kháng khuẩn",
+        "Nhôm sơn tĩnh điện",
+        "Nhôm sơn tĩnh điện kháng khuẩn",
+        "Nhựa",
+        "Nhựa ABS",
+        "Nhựa HIPS",
+        "Nhựa HIPS kháng khuẩn",
+        "PCM (Hợp kim thép)",
+        "Thép mạ kẽm",
+        "Thép sơn tĩnh điện",
+        "Tôn sơn tĩnh điện"
       ]
     }
   }

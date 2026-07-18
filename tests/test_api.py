@@ -10,6 +10,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 
 from advisor.api import create_app
 from advisor.categories.air_conditioner import load_config as load_air_conditioner_config
+from advisor.categories.cooler_freezer import load_config as load_cooler_freezer_config
 from advisor.categories.dryer import load_config as load_dryer_config
 from advisor.categories.dishwasher import load_config as load_dishwasher_config
 from advisor.categories.refrigerator import load_config
@@ -92,6 +93,7 @@ class FakeQdrant:
                 load_washing_machine_config(),
                 load_dryer_config(),
                 load_dishwasher_config(),
+                load_cooler_freezer_config(),
             )
         }
 
