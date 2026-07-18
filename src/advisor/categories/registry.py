@@ -154,6 +154,23 @@ def build_default_registry() -> CategoryRegistry:
     )
     registry.register(
         CategoryDefinition(
+            name="karaoke_microphone",
+            display_name="Micro karaoke",
+            package_path="advisor.categories.karaoke_microphone",
+            config_path=Path(__file__).with_name("karaoke_microphone")
+            / "config.yaml",
+        )
+    )
+    registry.register(
+        CategoryDefinition(
+            name="smartwatch",
+            display_name="Đồng hồ thông minh",
+            package_path="advisor.categories.smartwatch",
+            config_path=Path(__file__).with_name("smartwatch") / "config.yaml",
+        )
+    )
+    registry.register(
+        CategoryDefinition(
             name="tablet",
             display_name="Máy tính bảng",
             package_path="advisor.categories.tablet",

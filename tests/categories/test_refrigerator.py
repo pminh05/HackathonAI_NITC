@@ -493,11 +493,11 @@ def test_other_answer_is_interpreted_without_second_interrupt() -> None:
 
 
 def test_unimplemented_intent_returns_placeholder_without_qdrant() -> None:
-    llm = FakeLLM(intent=IntentLabel.KARAOKE_MICROPHONE)
+    llm = FakeLLM(intent=IntentLabel.PHONE_RECORDING_MICROPHONE)
     qdrant = FakeQdrant()
     graph = build_graph(llm=llm, qdrant_client=qdrant)
     result = graph.invoke(
-        {"messages": [HumanMessage(content="Tư vấn micro karaoke")]},
+        {"messages": [HumanMessage(content="Tư vấn micro thu âm điện thoại")]},
         {"configurable": {"thread_id": "placeholder"}},
     )
     assert "máy rửa chén" in result["response"]["answer"]
@@ -614,9 +614,9 @@ def test_switching_to_unsupported_category_and_returning_restores_refrigerator_c
                 has_profile_update=True,
             ),
             TurnAnalysisResult(
-                category=IntentLabel.KARAOKE_MICROPHONE,
+                category=IntentLabel.PHONE_RECORDING_MICROPHONE,
                 category_transition="switch",
-                switch_evidence="micro karaoke",
+                switch_evidence="micro thu âm điện thoại",
                 action="switch_category",
             ),
             TurnAnalysisResult(
@@ -636,9 +636,9 @@ def test_switching_to_unsupported_category_and_returning_restores_refrigerator_c
     )
     first_profile = first["need_profile"]
     switched = graph.invoke(
-        {"messages": [HumanMessage(content="Chuyển qua micro karaoke")]}, config
+        {"messages": [HumanMessage(content="Chuyển qua micro thu âm điện thoại")]}, config
     )
-    assert switched["conversation"]["active_category"] == "karaoke_microphone"
+    assert switched["conversation"]["active_category"] == "phone_recording_microphone"
 
     restored = graph.invoke(
         {"messages": [HumanMessage(content="Quay lại tủ lạnh")]}, config

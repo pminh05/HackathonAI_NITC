@@ -83,11 +83,11 @@ Thứ tự và output:
 | `changeName.py` | `<dataset>_processed.json` | `<dataset>_processed_vi.json` |
 | `dictionary.py` | `<dataset>_processed_vi.json` | `<dataset>_dictionary.json` |
 | `embedding.py` | `<dataset>_processed_vi.json` | `<dataset>_embedded.json` |
-| `qdrant.py` | `<dataset>_embedded.json` | Collection trên Qdrant |
+| `qdrant.py` | `<dataset>_processed_vi.json` (Cloud) hoặc `<dataset>_embedded.json` (local) | Collection trên Qdrant |
 
-Máy giặt, máy sấy quần áo, máy rửa chén, máy nước nóng, máy tính bảng và máy in
-dùng Qdrant Cloud Inference trực tiếp, nên không cần cài `torch` hoặc chạy
-embedding local:
+Máy giặt, máy sấy quần áo, máy rửa chén, máy nước nóng, micro karaoke,
+đồng hồ thông minh, máy tính bảng và máy in dùng Qdrant Cloud Inference trực
+tiếp, nên không cần cài `torch` hoặc chạy embedding local:
 
 ```powershell
 python may_giat/processing.py
@@ -144,6 +144,23 @@ hệ điều hành, RAM, bộ nhớ, màn hình, khối lượng, kết nối Wi
 mạng, gọi điện và thẻ nhớ. Giá được parse lại từ cột hiển thị vì cột sinh sẵn
 trong dataset đang lớn hơn thực tế 10 lần.
 
+Đồng hồ thông minh cũng chạy trực tiếp qua Cloud Inference:
+
+```powershell
+python dong_ho_thong_minh/processing.py
+python dong_ho_thong_minh/changeName.py
+python dong_ho_thong_minh/dictionary.py
+python dong_ho_thong_minh/qdrant.py
+```
+
+Collection `donghothongminh` dùng UUID ổn định và metadata canonical cho giá,
+tương thích iOS/Android, nhóm màn hình và chất liệu dây, kích thước đeo, khối
+lượng, thời lượng pin ở chế độ thường và ATM. Các capability quan trọng được
+tách thành `call_mode`, `has_cellular`, `has_gps`, `has_notifications`,
+`swim_ready` và `health_feature_tags` thay vì gom chung một field. Không suy thời
+lượng từ mAh, không quy đổi IP sang ATM và không suy tương thích chỉ dựa trên hãng.
+`embedding.py` được giữ làm công cụ local tùy chọn, không phải input production.
+
 Máy in chạy tương tự:
 
 ```powershell
@@ -157,6 +174,26 @@ Collection `mayin` chuẩn hóa công nghệ laser/phun/nhiệt, màu/đơn sắ
 tốc độ, công suất tháng, kết nối, khổ giấy, in hai mặt và kích thước mm. Semantic
 text chỉ lấy thông số máy in và không dùng các trường máy lạnh có trong pipeline
 cũ.
+
+Micro karaoke dùng Qdrant Cloud Inference và metadata canonical:
+
+```powershell
+python micro_karaoke/processing.py
+python micro_karaoke/changeName.py
+python micro_karaoke/dictionary.py
+python micro_karaoke/qdrant.py
+```
+
+`qdrant.py` đọc trực tiếp `micro_karaoke_processed_vi.json`, gửi semantic text
+cho model `intfloat/multilingual-e5-small` trên Qdrant Cloud và upsert point theo
+UUID ổn định. Collection `microkaraoke` dùng vector cosine 384 chiều. Metadata
+canonical gồm `brand_key`, loại có dây/không dây, băng tần, giá VND, dải tần số
+sóng, dải tần âm thanh, độ méo và năm sản xuất. Các tần số có cảnh báo chất lượng
+không được ghi vào field canonical; cảnh báo được giữ trong `data_quality_flags`.
+Do phần lớn catalog hiện chưa có giá xác minh, người dùng có thể chọn ngân sách
+`open`; nếu chọn mức trần cụ thể thì sản phẩm có giá vượt trần sẽ bị loại, còn
+sản phẩm chưa có giá vẫn được giữ làm phương án tham khảo và phải hiển thị cảnh
+báo chưa thể xác nhận phù hợp ngân sách.
 
 Tủ mát và tủ đông dùng pipeline local embedding đầy đủ:
 
