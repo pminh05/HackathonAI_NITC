@@ -120,4 +120,12 @@ def build_default_registry() -> CategoryRegistry:
             config_path=Path(__file__).with_name("washing_machine") / "config.yaml",
         )
     )
+    registry.register(
+        CategoryDefinition(
+            name="dryer",
+            display_name="Máy sấy quần áo",
+            package_path="advisor.categories.dryer",
+            config_path=Path(__file__).with_name("dryer") / "config.yaml",
+        )
+    )
     return registry

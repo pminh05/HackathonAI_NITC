@@ -100,6 +100,21 @@ cho model `intfloat/multilingual-e5-small` trên Qdrant Cloud và upsert point t
 UUID ổn định. Metadata chuẩn hóa gồm loại máy/lồng, giá, tải giặt, số người,
 inverter, khả năng sấy và kích thước cm.
 
+Máy sấy quần áo dùng pipeline local embedding đầy đủ:
+
+```powershell
+python may_say_quan_ao/processing.py
+python may_say_quan_ao/changeName.py
+python may_say_quan_ao/dictionary.py
+python may_say_quan_ao/embedding.py
+python may_say_quan_ao/qdrant.py
+```
+
+Collection `maysayquanao` dùng vector cosine 384 chiều. Metadata canonical gồm
+`dryer_type`, giá VND, tải sấy kg, khoảng số người, kích thước cm, công suất W,
+inverter và cảm biến. Các trường công nghệ/tiện ích tiếng Việt vẫn được giữ cho
+semantic retrieval và ranking.
+
 `processing.py` tạo `text` semantic tối đa 480 token và thêm `image_path` ở cấp đối tượng. Ví dụ:
 
 ```json
@@ -107,16 +122,17 @@ inverter, khả năng sấy và kích thước cm.
   "id": "...",
   "name": "...",
   "text": "...",
-  "image_path": "D:\\HackathonAI_NITC\\public\\may_lanh.jpg",
+  "image_path": "/public/may_lanh.jpg",
   "metadata": {}
 }
 ```
 
-Đường dẫn ảnh được tính từ vị trí project, không phụ thuộc thư mục hiện hành khi chạy lệnh.
+Tên file tương ứng nằm trong `frontend/public`. Frontend có thể dùng trực tiếp
+đường dẫn `/public/...`; API cũng phục vụ cùng asset qua `/product-images/...`.
 
 ## Cấu hình
 
-- Ảnh danh mục nằm trong `D:\HackathonAI_NITC\public` và có tên trùng dataset.
+- Ảnh danh mục nằm trong `frontend/public` và có tên trùng dataset.
 - Model embedding: `intfloat/multilingual-e5-small` hoặc bản model local đã cấu hình.
 - Trước khi chạy `qdrant.py`, khai báo `QDRANT_URL` và `QDRANT_API_KEY` trong môi trường hoặc file `.env`.
 

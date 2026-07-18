@@ -10,6 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent
 INPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed_vi.json"
 OUTPUT_FILE = BASE_DIR / "data" / f"{DATASET}_embedded.json"
 MODEL_NAME = "intfloat/multilingual-e5-small"
+VECTOR_SIZE = 384
 BATCH_SIZE = 128
 
 
@@ -33,6 +34,11 @@ def main():
             normalize_embeddings=True,
             convert_to_numpy=True,
             show_progress_bar=True,
+        )
+
+    if vectors.ndim != 2 or vectors.shape[1] != VECTOR_SIZE:
+        raise ValueError(
+            f"Model trả vector {vectors.shape}, yêu cầu (*, {VECTOR_SIZE})"
         )
 
     for item, vector in zip(data, vectors):

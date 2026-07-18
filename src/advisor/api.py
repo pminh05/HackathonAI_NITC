@@ -30,7 +30,7 @@ from advisor.schemas import ApplicationSettings, ClarificationAnswer
 
 
 logger = logging.getLogger(__name__)
-PUBLIC_IMAGE_DIR = Path(__file__).resolve().parents[2] / "public"
+PUBLIC_IMAGE_DIR = Path(__file__).resolve().parents[2] / "frontend" / "public"
 
 SSE_HEADERS = {
     "Cache-Control": "no-cache",

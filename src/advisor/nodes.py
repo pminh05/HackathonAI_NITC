@@ -1221,7 +1221,8 @@ def placeholder_response_node(state: AdvisorState) -> NodeUpdate:
     label = SLUG_LABELS.get(active) if active else None
     if label:
         answer = (
-            "Bản hiện tại hỗ trợ tư vấn tủ lạnh, máy lạnh và máy giặt; "
+            "Bản hiện tại hỗ trợ tư vấn tủ lạnh, máy lạnh, máy giặt và máy sấy "
+            "quần áo; "
             f"ngành hàng {label.value} chưa được bật."
         )
     else:
