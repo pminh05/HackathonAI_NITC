@@ -1,0 +1,123 @@
+category: water_heater
+display_name: Máy nước nóng
+collection: maynuocnong
+embedding_model: intfloat/multilingual-e5-small
+retrieval_limit: 12
+
+required_profile_fields:
+  - heater_type
+  - water_supply
+  - budget
+
+payload_fields:
+  category_scope: metadata.category_scope
+  brand: metadata.brand
+  product_type: metadata.product_type
+  original_price: metadata.original_price_vnd
+  promotional_price: metadata.promotional_price_vnd
+  capacity: metadata.capacity_l
+  power: metadata.power_w
+  heating_time_max: metadata.heating_time_max_minutes
+  booster_pump: metadata.has_booster_pump
+  included_shower: metadata.includes_shower
+  width: metadata.width_cm
+  height: metadata.height_cm
+  depth: metadata.depth_cm
+  ip_rating: metadata.ip_rating
+  safety_tags: metadata.safety_tags
+
+payload_indexes:
+  metadata.category_scope: keyword
+  metadata.brand: keyword
+  metadata.product_type: keyword
+  metadata.original_price_vnd: integer
+  metadata.promotional_price_vnd: integer
+  metadata.capacity_l: integer
+  metadata.power_w: integer
+  metadata.heating_time_max_minutes: float
+  metadata.has_booster_pump: bool
+  metadata.includes_shower: bool
+  metadata.width_cm: float
+  metadata.height_cm: float
+  metadata.depth_cm: float
+  metadata.ip_rating: keyword
+  metadata.safety_tags: keyword
+
+question_catalog:
+  heater_type:
+    question_type: explicit
+    question: Bạn muốn máy nước nóng theo kiểu làm nóng nào?
+    options:
+      - option_id: direct
+        label: Làm nóng trực tiếp, nóng liền
+        profile_updates:
+          hard_constraints: {product_types: [direct]}
+      - option_id: indirect
+        label: Làm nóng gián tiếp, có bình chứa
+        profile_updates:
+          hard_constraints: {product_types: [indirect]}
+      - option_id: solar
+        label: Dùng năng lượng mặt trời
+        profile_updates:
+          hard_constraints: {product_types: [solar]}
+      - option_id: direct_multipoint
+        label: Làm nóng trực tiếp cho nhiều điểm
+        profile_updates:
+          hard_constraints: {product_types: [direct_multipoint]}
+      - option_id: flexible
+        label: Chưa xác định, cần tư vấn theo nhu cầu
+        profile_updates:
+          soft_preferences: [heater_type_flexible]
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  water_supply:
+    question_type: implicit
+    question: Điều kiện cấp nước hoặc cách sử dụng của bạn gần với trường hợp nào?
+    options:
+      - option_id: stable
+        label: Áp lực nước ổn định, dùng tại một phòng tắm
+        profile_updates:
+          water_supply: stable
+      - option_id: low_pressure
+        label: Nguồn nước yếu hoặc áp lực thấp
+        profile_updates:
+          water_supply: low_pressure
+          usage_preferences: [low_pressure]
+          soft_preferences: [low_pressure_compatible, booster_pump]
+      - option_id: multi_outlet
+        label: Cần cấp nước nóng cho nhiều điểm
+        profile_updates:
+          water_supply: multi_outlet
+          usage_preferences: [multi_outlet]
+          soft_preferences: [multipoint_supply]
+      - option_id: open
+        label: Chưa rõ điều kiện nguồn nước
+        profile_updates:
+          water_supply: open
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  budget:
+    question_type: explicit
+    question: Ngân sách tối đa bạn dự kiến dành cho máy nước nóng là bao nhiêu?
+    options:
+      - option_id: under_3m
+        label: Tối đa 3 triệu đồng
+        profile_updates: {budget_max_vnd: 3000000}
+      - option_id: 3m_5m
+        label: Khoảng 3–5 triệu đồng
+        profile_updates: {budget_max_vnd: 5000000}
+      - option_id: 5m_9m
+        label: Khoảng 5–9 triệu đồng
+        profile_updates: {budget_max_vnd: 9000000}
+      - option_id: over_9m
+        label: Trên 9 triệu đồng
+        profile_updates:
+          budget_segment: premium
+          soft_preferences: [premium]
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}

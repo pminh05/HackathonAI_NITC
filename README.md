@@ -2,7 +2,10 @@
 
 AI chatbot tư vấn và so sánh sản phẩm theo nhu cầu thực tế của khách hàng. Hệ thống sử dụng LangGraph để quản lý luồng hội thoại, Human-in-the-loop để thu thập thông tin còn thiếu và Qdrant để truy xuất sản phẩm theo từng ngành hàng.
 
-Phiên bản hiện tại triển khai đầy đủ cho **tủ lạnh**, **máy lạnh** và **máy giặt**, sau đó có thể mở rộng sang các sheet sản phẩm khác qua `CategorySpec`.
+Phiên bản hiện tại triển khai đầy đủ cho **tủ lạnh**, **máy lạnh**, **máy giặt**,
+**máy sấy quần áo**, **máy rửa chén**, **tủ mát**, **tủ đông**,
+**máy nước nóng**, **máy tính bảng** và **máy in**, sau đó có thể mở rộng sang
+các sheet sản phẩm khác qua `CategorySpec`.
 
 Tài liệu HTTP API, SSE và Human-in-the-loop: [docs/API.md](docs/API.md).
 
@@ -11,7 +14,9 @@ Tài liệu HTTP API, SSE và Human-in-the-loop: [docs/API.md](docs/API.md).
 - Python 3.11 trở lên.
 - Node.js 20.19 trở lên hoặc Node.js 22.12 trở lên.
 - Tài khoản Google AI và `GOOGLE_API_KEY` hợp lệ.
-- Qdrant Cloud có bật Cloud Inference, collection `tulanh`, `maylanh` và `maygiat` đã chứa dữ liệu sản phẩm.
+- Qdrant Cloud có bật Cloud Inference, collection `tulanh`, `maylanh`, `maygiat`,
+  `maysayquanao`, `mayruachen`, `tumattudong`, `maynuocnong`, `maytinhbang` và
+  `mayin` đã chứa dữ liệu sản phẩm.
 - npm đi kèm Node.js.
 
 Backend và frontend chạy thành hai process riêng:
@@ -60,6 +65,42 @@ QDRANT_URL=https://your-cluster.qdrant.io
 QDRANT_API_KEY=your-qdrant-api-key
 ```
 
+Để tự động chuyển sang Qwen3.6-27B trên FPT AI Factory khi Gemini lỗi, cấu
+hình thêm API key của FPT. `FPT_BASE_URL` là root URL của Marketplace, không
+thêm hậu tố `/v1`:
+
+```dotenv
+FPT_API_KEY=your-fpt-api-key
+FPT_MODEL=Qwen3.6-27B
+FPT_BASE_URL=https://mkp-api.fptcloud.com
+FPT_ENABLE_THINKING=false
+FPT_TIMEOUT_SECONDS=30
+FPT_MAX_RETRIES=0
+```
+
+Fallback được áp dụng cho cả phản hồi văn bản và structured output. Nếu chưa
+cấu hình `FPT_API_KEY`, ứng dụng tiếp tục chỉ dùng Gemini như trước. Hệ thống
+cũng hỗ trợ chạy FPT-only khi để trống `GOOGLE_API_KEY`; cách này tránh một lần
+gọi Gemini thất bại ở mỗi lần khởi động nếu Google key không còn hợp lệ.
+`FPT_ENABLE_THINKING=false` truyền hard switch của Qwen vào chat template để
+model trả lời trực tiếp mà không sinh thinking block.
+Mọi structured output từ FPT đều dùng JSON schema với `include_raw=True`. Adapter
+thêm output contract tường minh, phục hồi JSON thường/fenced JSON/tool call/YAML
+hoặc Markdown phổ biến, rồi luôn xác thực lại bằng Pydantic. Cách này tránh treo
+do function calling chứa trường dictionary và không để dữ liệu sai schema đi
+tiếp trong graph. Mỗi request có timeout 30 giây và không retry mặc định vì đây
+đã là nhánh fallback sau Gemini.
+
+Các model đều là LangChain Runnable và có metadata theo provider/model. Khi
+cần theo dõi bằng LangSmith, chỉ cần bổ sung các biến môi trường chuẩn; không
+cần đổi code gọi model:
+
+```dotenv
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=your-langsmith-api-key
+LANGSMITH_PROJECT=product-advisor
+```
+
 Các giá trị local còn lại có thể giữ mặc định:
 
 ```dotenv
@@ -68,7 +109,16 @@ API_HOST=127.0.0.1
 API_PORT=8000
 API_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 SSE_HEARTBEAT_SECONDS=15
+GUARDRAIL_MODE=enforce
+GUARDRAIL_OUTPUT_HOLDBACK_CHARS=64
 ```
+
+Guardrail prompt-injection chạy hoàn toàn trong process: không thêm model call,
+network hop hay Qdrant query. Input, lịch sử, custom clarification answer và
+candidate lấy từ Qdrant đều được scan bằng pattern đã compile; model prompt
+được tách thành system policy và task data. Output SSE giữ lại 64 ký tự cuối để
+phát hiện pattern đi qua ranh giới token trước khi nội dung được gửi ra client.
+`GUARDRAIL_MODE=observe` chỉ nên dùng tạm thời để đo false positive.
 
 Backend uses SQLite checkpoints by default. For a deployed Supabase/PostgreSQL
 backend, configure the Session pooler connection string instead:
@@ -106,6 +156,23 @@ Với collection `maygiat`:
 ```bash
 PYTHONPATH=src .venv/bin/python -m advisor.categories.washing_machine.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.washing_machine.setup_indexes --apply
+```
+
+Với collection `maysayquanao`, `mayruachen` và `tumattudong`:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m advisor.categories.dryer.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.dryer.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.dishwasher.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.dishwasher.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.cooler_freezer.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.cooler_freezer.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.water_heater.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.water_heater.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.tablet.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.tablet.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.printer.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.printer.setup_indexes --apply
 ```
 
 Lệnh này chỉ tạo payload index; không tạo collection và không import catalog sản phẩm.
@@ -267,6 +334,12 @@ Mỗi sheet hoặc ngành hàng được index thành một collection riêng:
 Tủ Lạnh    → tulanh
 Máy lạnh   → maylanh
 Máy giặt   → maygiat
+Máy sấy quần áo → maysayquanao
+Máy rửa chén → mayruachen
+Tủ mát, tủ đông → tumattudong
+Máy nước nóng → maynuocnong
+Máy tính bảng → maytinhbang
+Máy in → mayin
 Laptop     → products_laptop
 ```
 
@@ -281,12 +354,21 @@ Các trường chuẩn hóa như giá, dung tích, kích thước và tính năn
 cho metadata filter. Thương hiệu cùng các trường mô tả dài như công nghệ và tiện
 ích được đưa vào semantic retrieval.
 
-Collection `tulanh`, `maylanh` và `maygiat` dùng embedding `intfloat/multilingual-e5-small` qua Qdrant Cloud Inference. Trước khi chạy live, kiểm tra payload index của từng category:
+Collection `tulanh`, `maylanh`, `maygiat`, `maysayquanao`, `mayruachen`,
+`tumattudong`, `maynuocnong`, `maytinhbang` và `mayin` dùng embedding
+`intfloat/multilingual-e5-small`. Trước khi chạy live, kiểm tra payload index
+của từng category:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m advisor.categories.refrigerator.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.air_conditioner.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.washing_machine.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.dryer.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.dishwasher.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.cooler_freezer.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.water_heater.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.tablet.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.printer.setup_indexes
 ```
 
 Nếu lệnh báo thiếu index, tạo chúng một lần bằng:
@@ -295,6 +377,12 @@ Nếu lệnh báo thiếu index, tạo chúng một lần bằng:
 PYTHONPATH=src .venv/bin/python -m advisor.categories.refrigerator.setup_indexes --apply
 PYTHONPATH=src .venv/bin/python -m advisor.categories.air_conditioner.setup_indexes --apply
 PYTHONPATH=src .venv/bin/python -m advisor.categories.washing_machine.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.dryer.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.dishwasher.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.cooler_freezer.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.water_heater.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.tablet.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.printer.setup_indexes --apply
 ```
 
 Runtime chỉ kiểm tra prerequisite và không tự thay đổi schema Qdrant.
@@ -418,6 +506,36 @@ product-advisor/
 │   │   │   ├── prompts.py
 │   │   │   ├── filter_builder.py
 │   │   │   └── normalizer.py
+│   │   ├── dryer/
+│   │   │   ├── config.yaml
+│   │   │   ├── schemas.py
+│   │   │   ├── prompts.py
+│   │   │   ├── filter_builder.py
+│   │   │   └── normalizer.py
+│   │   ├── dishwasher/
+│   │   │   ├── config.yaml
+│   │   │   ├── schemas.py
+│   │   │   ├── prompts.py
+│   │   │   ├── filter_builder.py
+│   │   │   └── normalizer.py
+│   │   ├── water_heater/
+│   │   │   ├── config.yaml
+│   │   │   ├── schemas.py
+│   │   │   ├── prompts.py
+│   │   │   ├── filter_builder.py
+│   │   │   └── normalizer.py
+│   │   ├── tablet/
+│   │   │   ├── config.yaml
+│   │   │   ├── schemas.py
+│   │   │   ├── prompts.py
+│   │   │   ├── filter_builder.py
+│   │   │   └── normalizer.py
+│   │   ├── printer/
+│   │   │   ├── config.yaml
+│   │   │   ├── schemas.py
+│   │   │   ├── prompts.py
+│   │   │   ├── filter_builder.py
+│   │   │   └── normalizer.py
 │   │   │
 │   │   └── registry.py
 │   │
@@ -433,7 +551,12 @@ product-advisor/
     └── categories/
         ├── test_refrigerator.py
         ├── test_air_conditioner.py
-        └── test_washing_machine.py
+        ├── test_washing_machine.py
+        ├── test_dryer.py
+        ├── test_dishwasher.py
+        ├── test_water_heater.py
+        ├── test_tablet.py
+        └── test_printer.py
 ```
 
 ## Vai trò các thành phần

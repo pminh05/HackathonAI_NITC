@@ -137,9 +137,11 @@ def main():
         seen_ids.add(sku)
 
         brand = clean(product.get("brand")) or "không xác định"
+        model = clean(product.get("model_code"))
+        product_name = f"{CATEGORY} {brand} {model or sku}"
         output.append({
             "id": sku,
-            "name": f"{CATEGORY} {brand} {sku}",
+            "name": product_name,
             "text": create_semantic_text(product, sku),
             "image_path": IMAGE_PATH,
             "metadata": create_metadata(product, index),

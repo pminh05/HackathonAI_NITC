@@ -5,7 +5,13 @@ from pathlib import Path
 
 DATASET = "may_say_quan_ao"
 CATEGORY = "máy sấy quần áo"
-DICTIONARY_FIELDS = ["Loại sản phẩm","Công nghệ sấy","Động cơ","Chương trình","Công nghệ tiết kiệm điện","Tiện ích"]
+DICTIONARY_FIELDS = [
+    "Loại sản phẩm",
+    "Công nghệ",
+    "Động cơ",
+    "Công nghệ tiết kiệm điện",
+    "Tiện ích",
+]
 BASE_DIR = Path(__file__).resolve().parent
 INPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed_vi.json"
 OUTPUT_FILE = BASE_DIR / "data" / f"{DATASET}_dictionary.json"
@@ -60,6 +66,20 @@ def main():
     result = {
         "dataset": DATASET,
         "category": CATEGORY,
+        "normalized_fields": {
+            "dryer_type": "keyword: heat_pump, condenser hoặc vented",
+            "original_price_vnd": "integer, đơn vị VND",
+            "promotional_price_vnd": "integer, đơn vị VND",
+            "dry_capacity_kg": "float, đơn vị kg",
+            "people_min": "integer",
+            "people_max": "integer hoặc thiếu với khoảng mở",
+            "width_cm": "float, đơn vị cm",
+            "height_cm": "float, đơn vị cm",
+            "depth_cm": "float, đơn vị cm",
+            "power_max_w": "integer, đơn vị W",
+            "has_inverter": "bool hoặc thiếu khi chưa xác định",
+            "has_sensor": "bool hoặc thiếu khi chưa xác định",
+        },
         "fields": fields,
     }
     OUTPUT_FILE.write_text(

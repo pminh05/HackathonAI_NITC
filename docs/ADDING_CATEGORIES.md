@@ -126,7 +126,6 @@ Mỗi thành viên nhận một category nếu metadata đã sạch. Với categ
 phải chuẩn hóa ingestion, tách thành hai task tuần tự: `ingestion contract`
 trước, `advisor package` sau. Không cho hai người cùng sửa một package.
 
-Danh sách slug hiện có thể giao: `air_conditioner`, `washing_machine`,
-`dryer`, `dishwasher`, `cooler_freezer`, `water_heater`,
-`karaoke_microphone`, `phone_recording_microphone`, `smartwatch`, `desktop`,
-`monitor`, `printer`, `tablet`.
+Danh sách slug hiện có thể giao: `karaoke_microphone`,
+`phone_recording_microphone`, `smartwatch`, `desktop`, `monitor`, `printer` và
+`tablet`.

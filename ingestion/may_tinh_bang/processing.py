@@ -10,7 +10,42 @@ except ImportError:
 
 CATEGORY = "máy tính bảng"
 DATASET = "may_tinh_bang"
-GROUPS = [["Hiệu năng",["Chip xử lý (CPU)","Tốc độ CPU","so_nhan_cpu","Chip đồ họa (GPU)","ram_gb"]],["Màn hình",["kich_thuoc_man_hinh_inch","Màn hình hiển thị","Độ phân giải","Tần số quét"]],["Lưu trữ và phần mềm",["bo_nho_luu_tru_gb","bo_nho_kha_dung_gb","Hệ điều hành"]],["Kết nối",["SIM","Mạng di động","Wifi","Bluetooth","GPS","Thực hiện cuộc gọi"]],["Camera và pin",["Tính năng camera sau","Quay phim","Dung lượng pin","Cổng sạc","khoi_luong_g"]]]
+GROUPS = [
+    [
+        "Hiệu năng",
+        [
+            "Chip xử lý (CPU)",
+            "Tốc độ CPU",
+            "so_nhan_cpu",
+            "Chip đồ họa (GPU)",
+            "ram_gb",
+        ],
+    ],
+    [
+        "Màn hình",
+        ["kich_thuoc_man_hinh_inch", "Màn hình hiển thị", "Độ phân giải"],
+    ],
+    [
+        "Lưu trữ và phần mềm",
+        ["bo_nho_luu_tru_gb", "bo_nho_kha_dung_gb", "Hệ điều hành", "Thẻ nhớ"],
+    ],
+    [
+        "Kết nối",
+        ["SIM", "Mạng di động", "Wifi", "Bluetooth", "GPS", "Thực hiện cuộc gọi"],
+    ],
+    [
+        "Di động, camera và pin",
+        [
+            "Tính năng camera sau",
+            "Quay phim",
+            "dung_luong_pin_mah",
+            "dung_luong_pin_wh",
+            "Cổng sạc",
+            "cong_suat_sac_toi_da_w",
+            "khoi_luong_g",
+        ],
+    ],
+]
 MAX_TOKENS = 480
 BASE_DIR = Path(__file__).resolve().parent
 IMAGE_PATH = "/public/may_tinh_bang.jpg"
@@ -137,9 +172,10 @@ def main():
         seen_ids.add(sku)
 
         brand = clean(product.get("brand")) or "không xác định"
+        model = clean(product.get("model_code"))
         output.append({
             "id": sku,
-            "name": f"{CATEGORY} {brand} {sku}",
+            "name": f"{CATEGORY} {brand} {model or sku}",
             "text": create_semantic_text(product, sku),
             "image_path": IMAGE_PATH,
             "metadata": create_metadata(product, index),

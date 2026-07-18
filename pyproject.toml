@@ -13,6 +13,7 @@ dependencies = [
     "google-genai",
     "httpx",
     "langchain-google-genai",
+    "langchain-openai",
     "langgraph",
     "langgraph-checkpoint-sqlite",
     "langgraph-checkpoint-postgres",
@@ -22,6 +23,7 @@ dependencies = [
     "pytest",
     "qdrant-client",
     "uvicorn[standard]",
+    "langsmith>=0.10.6",
 ]
 
 [tool.hatch.build.targets.wheel]

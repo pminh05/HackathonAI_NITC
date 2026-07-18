@@ -4,7 +4,7 @@ venv/
 env/
 __pycache__/
 *.py[cod]
-.data/*.sqlite
+.data/
 *.sqlite
 .pytest_cache/
 .mypy_cache/

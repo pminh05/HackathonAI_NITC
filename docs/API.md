@@ -1,6 +1,9 @@
 # Product Advisor API
 
-Tài liệu này mô tả HTTP API tư vấn tủ lạnh, máy lạnh và máy giặt. API dùng FastAPI, lưu trạng thái hội thoại theo `thread_id` và trả kết quả chat bằng Server-Sent Events (SSE).
+Tài liệu này mô tả HTTP API tư vấn tủ lạnh, máy lạnh, máy giặt, máy sấy quần áo,
+máy rửa chén, tủ mát, tủ đông, máy nước nóng, máy tính bảng và máy in. API dùng
+FastAPI, lưu trạng thái hội thoại theo `thread_id` và trả kết quả chat bằng
+Server-Sent Events (SSE).
 
 ## 1. Chạy dịch vụ
 
@@ -323,6 +326,54 @@ Catalog máy giặt hỗ trợ:
 | `budget` | `under_8m`, `8m_12m`, `12m_20m`, `over_20m`, `other` |
 | `usage_preferences` | `daily_laundry`, `bulky_items`, `hygiene_care`, `energy_saving`, `quick_wash`, `wash_and_dry`, `other` |
 
+Catalog máy sấy quần áo hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `household_size` | `one_two`, `three_five`, `six_seven`, `over_seven`, `other` |
+| `budget` | `under_10m`, `10m_15m`, `15m_20m`, `over_20m`, `other` |
+| `usage_preferences` | `rainy_season`, `frequent_drying`, `bulky_items`, `delicate_care`, `energy_saving`, `quick_dry`, `other` |
+
+Catalog máy rửa chén hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `installation` | `freestanding`, `built_in`, `semi_integrated`, `mini`, `flexible`, `other` |
+| `capacity` | `compact`, `standard`, `large`, `open`, `other` |
+| `budget` | `under_12m`, `12m_18m`, `18m_25m`, `over_25m`, `other` |
+
+Catalog tủ mát, tủ đông hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `product_family` | `cooler`, `freezer`, `open`, `other` |
+| `budget` | `under_8m`, `8m_15m`, `15m_30m`, `over_30m`, `other` |
+| `usage_preferences` | `display_drinks`, `fresh_food_cooling`, `bulk_frozen_storage`, `commercial_storage`, `convertible_use`, `energy_saving`, `other` |
+
+Catalog máy nước nóng hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `heater_type` | `direct`, `indirect`, `solar`, `direct_multipoint`, `flexible`, `other` |
+| `water_supply` | `stable`, `low_pressure`, `multi_outlet`, `open`, `other` |
+| `budget` | `under_3m`, `3m_5m`, `5m_9m`, `over_9m`, `other` |
+
+Catalog máy tính bảng hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `primary_usage` | `study_work`, `entertainment`, `gaming`, `drawing_notes`, `children`, `general`, `other` |
+| `budget` | `under_10m`, `10m_20m`, `20m_35m`, `over_35m`, `open`, `other` |
+| `connectivity` | `wifi_only`, `cellular_4g`, `cellular_5g`, `flexible`, `other` |
+
+Catalog máy in hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `print_purpose` | `mono_documents`, `color_documents`, `photo`, `receipt_label`, `general`, `other` |
+| `monthly_volume` | `light`, `regular`, `office`, `high`, `open`, `other` |
+| `budget` | `under_3m`, `3m_5m`, `5m_10m`, `over_10m`, `open`, `other` |
+
 Client vẫn nên render theo `questions[].options` từ response thay vì phụ thuộc vào bảng này, vì catalog có thể thay đổi.
 
 ## 6. Mã lỗi
@@ -331,7 +382,7 @@ Client vẫn nên render theo `questions[].options` từ response thay vì phụ
 | --- | --- |
 | `404 Not Found` | `thread_id` không tồn tại |
 | `409 Conflict` | Thread đang chạy, đang chờ HITL nhưng gọi `/chat`, chưa sẵn sàng, hoặc gọi resume khi không chờ HITL |
-| `422 Unprocessable Entity` | Body sai schema, thiếu/thừa `question_id`, sai `option_id`, lặp câu hỏi hoặc thiếu `custom_answer` cho `other` |
+| `422 Unprocessable Entity` | Body sai schema, form làm rõ không hợp lệ, hoặc guardrail chặn prompt injection với `detail.code=guardrail_blocked` |
 | SSE `error.code=configuration_error` | Thiếu/sai cấu hình dịch vụ; không nên retry nguyên request cho đến khi server được sửa |
 | SSE `error.code=service_error` | Lỗi runtime từ graph hoặc dịch vụ phụ thuộc; có thể retry |
 | SSE `error.code=incomplete_run` | Graph dừng mà không tạo form hoặc kết quả cuối; có thể retry |
@@ -410,5 +461,7 @@ Swagger UI phù hợp để kiểm tra schema và request. Tùy trình duyệt, 
 | `API_PORT` | `8000` | Port quy ước khi chạy server |
 | `API_CORS_ORIGINS` | localhost ports 3000, 5173 | Danh sách origin, phân cách bằng dấu phẩy |
 | `SSE_HEARTBEAT_SECONDS` | `15` | Chu kỳ heartbeat của stream |
+| `GUARDRAIL_MODE` | `enforce` | `enforce` chặn finding mức cao; `observe` chỉ ghi log để hiệu chỉnh pattern |
+| `GUARDRAIL_OUTPUT_HOLDBACK_CHARS` | `64` | Cửa sổ ký tự giữ lại để kiểm tra output trước khi phát SSE |
 
 Hiện chưa có authentication/authorization. Không expose API MVP trực tiếp ra Internet trước khi bổ sung auth, rate limiting và cấu hình CORS phù hợp.

@@ -10,7 +10,69 @@ except ImportError:
 
 CATEGORY = "máy sấy quần áo"
 DATASET = "may_say_quan_ao"
-GROUPS = [["Nhu cầu sấy",["Loại sản phẩm","khoi_luong_say_kg","Số người sử dụng","so_nguoi_min","so_nguoi_max","tai_say_khuyen_nghi_min_kg","tai_say_khuyen_nghi_max_kg"]],["Công nghệ sấy",["Công nghệ sấy","Động cơ","Chương trình","nhiet_do_min_c","nhiet_do_max_c"]],["Tiết kiệm và tiện ích",["Công nghệ tiết kiệm điện","cong_suat_min_w","cong_suat_max_w","Tiện ích","Bảng điều khiển"]],["Lắp đặt",["cao_cm","ngang_cm","sau_cm","khoi_luong_may_kg","Chất liệu ruột"]]]
+GROUPS = [
+    [
+        "Nhu cầu sấy",
+        [
+            "Loại sản phẩm",
+            "khoi_luong_say_kg",
+            "Số người sử dụng",
+            "so_nguoi_min",
+            "so_nguoi_max",
+            "tai_say_khuyen_nghi_min_kg",
+            "tai_say_khuyen_nghi_max_kg",
+        ],
+    ],
+    [
+        "Công nghệ sấy",
+        [
+            "Công nghệ",
+            "Công nghệ sấy",
+            "Động cơ",
+            "Chương trình",
+            "Cảm biến",
+            "nhiet_do_min_c",
+            "nhiet_do_max_c",
+        ],
+    ],
+    [
+        "Tiết kiệm và tiện ích",
+        [
+            "Công nghệ tiết kiệm điện",
+            "cong_suat_min_w",
+            "cong_suat_max_w",
+            "Tiện ích",
+            "Bảng điều khiển",
+        ],
+    ],
+    [
+        "Lắp đặt",
+        [
+            "cao_cm",
+            "ngang_cm",
+            "sau_cm",
+            "khoi_luong_may_kg",
+            "Dài ống xả nước",
+            "Dài ống thoát khí",
+            "Chất liệu ruột",
+        ],
+    ],
+]
+FIELD_LABELS = {
+    "khoi_luong_say_kg": "khối lượng sấy (kg)",
+    "so_nguoi_min": "số người tối thiểu",
+    "so_nguoi_max": "số người tối đa",
+    "tai_say_khuyen_nghi_min_kg": "tải sấy khuyến nghị tối thiểu (kg)",
+    "tai_say_khuyen_nghi_max_kg": "tải sấy khuyến nghị tối đa (kg)",
+    "nhiet_do_min_c": "nhiệt độ tối thiểu (°C)",
+    "nhiet_do_max_c": "nhiệt độ tối đa (°C)",
+    "cong_suat_min_w": "công suất tối thiểu (W)",
+    "cong_suat_max_w": "công suất tối đa (W)",
+    "cao_cm": "chiều cao (cm)",
+    "ngang_cm": "chiều ngang (cm)",
+    "sau_cm": "chiều sâu (cm)",
+    "khoi_luong_may_kg": "khối lượng máy (kg)",
+}
 MAX_TOKENS = 480
 BASE_DIR = Path(__file__).resolve().parent
 IMAGE_PATH = "/public/may_say_quan_ao.jpg"
@@ -92,13 +154,17 @@ def create_semantic_text(product, sku):
             signature = (field, str(value))
             if meaningful(value) and signature not in used:
                 used.add(signature)
-                label = field.replace("_", " ")
+                label = FIELD_LABELS.get(field, field.replace("_", " "))
                 facts.append(f"{label}: {display_value(value)}")
         if facts:
             sentences.append(f"{heading}: " + "; ".join(facts[:8]) + ".")
 
     origin = clean(product.get("Sản xuất tại"))
-    year = clean(product.get("nam_ra_mat") or product.get("nam_san_xuat_chuan"))
+    year = clean(
+        product.get("nam_dong_san_pham")
+        or product.get("nam_ra_mat")
+        or product.get("nam_san_xuat_chuan")
+    )
     if origin:
         sentences.append(f"Sản xuất tại {origin}.")
     if year:
