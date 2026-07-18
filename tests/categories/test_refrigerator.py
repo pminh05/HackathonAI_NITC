@@ -335,6 +335,7 @@ def test_candidate_normalization_reads_vietnamese_metadata() -> None:
                 "product_id": "sku-1",
                 "name": "Tủ lạnh thử nghiệm",
                 "text": "Mô tả sản phẩm.",
+                "image_path": "/catalog/public/tu_lanh.jpg",
                 "metadata": {
                     "brand": "Test",
                     "Kiểu dáng chuẩn": "Ngăn đá dưới",
@@ -357,6 +358,7 @@ def test_candidate_normalization_reads_vietnamese_metadata() -> None:
 
     assert candidate["style"] == "Ngăn đá dưới"
     assert candidate["effective_price_vnd"] == 15_000_000
+    assert candidate["image_path"] == "/catalog/public/tu_lanh.jpg"
     assert candidate["capacity_lit"] == 350
     assert candidate["freezer_capacity_lit"] == 92
     assert candidate["annual_energy_kwh"] == 381

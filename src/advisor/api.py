@@ -6,12 +6,14 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, AsyncIterator, Literal
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 from pydantic import BaseModel, Field, model_validator
@@ -28,6 +30,7 @@ from advisor.schemas import ApplicationSettings, ClarificationAnswer
 
 
 logger = logging.getLogger(__name__)
+PUBLIC_IMAGE_DIR = Path(__file__).resolve().parents[2] / "public"
 
 SSE_HEADERS = {
     "Cache-Control": "no-cache",
@@ -481,6 +484,12 @@ def create_app(
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Content-Type"],
     )
+    if PUBLIC_IMAGE_DIR.is_dir():
+        application.mount(
+            "/product-images",
+            StaticFiles(directory=PUBLIC_IMAGE_DIR),
+            name="product-images",
+        )
 
     sse_response_docs = {
         200: {

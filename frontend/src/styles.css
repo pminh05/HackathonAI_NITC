@@ -205,6 +205,10 @@ textarea:disabled {
   margin: 0 0 14px;
 }
 
+.markdown-content {
+  white-space: normal;
+}
+
 .markdown-content p:last-child {
   margin-bottom: 0;
 }
@@ -223,6 +227,78 @@ textarea:disabled {
 .markdown-content strong {
   color: #1f2b23;
   font-weight: 750;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  margin: 22px 0 10px;
+  color: #1f2b23;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+}
+
+.markdown-content h1:first-child,
+.markdown-content h2:first-child,
+.markdown-content h3:first-child,
+.markdown-content h4:first-child {
+  margin-top: 0;
+}
+
+.markdown-content h1 { font-size: 22px; }
+.markdown-content h2 { font-size: 19px; }
+.markdown-content h3 { font-size: 16px; }
+.markdown-content h4 { font-size: 15px; }
+
+.markdown-content hr {
+  margin: 20px 0;
+  border: 0;
+  border-top: 1px solid #dfe5e0;
+}
+
+.markdown-content table {
+  display: block;
+  width: 100%;
+  margin: 12px 0 18px;
+  overflow-x: auto;
+  border-spacing: 0;
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+
+.markdown-content th,
+.markdown-content td {
+  padding: 9px 11px;
+  border: 1px solid #dfe5e0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-content th {
+  color: #263229;
+  background: #f2f6f3;
+  font-weight: 750;
+}
+
+.markdown-content code {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: #edf2ee;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.markdown-content pre {
+  overflow-x: auto;
+  padding: 13px;
+  border-radius: 8px;
+  background: #edf2ee;
+  white-space: pre;
+}
+
+.markdown-content pre code {
+  padding: 0;
 }
 
 .product-list {
