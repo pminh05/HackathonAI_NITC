@@ -1,0 +1,58 @@
+{
+  "dataset": "may_in",
+  "category": "máy in",
+  "fields": {
+    "Loại máy": {
+      "description": "Các giá trị loại máy dùng để tìm kiếm, lọc và hiểu sản phẩm máy in.",
+      "data_type": "string",
+      "possible_values": []
+    },
+    "Công nghệ in": {
+      "description": "Các giá trị công nghệ in dùng để tìm kiếm, lọc và hiểu sản phẩm máy in.",
+      "data_type": "string",
+      "possible_values": []
+    },
+    "Chức năng": {
+      "description": "Các giá trị chức năng dùng để tìm kiếm, lọc và hiểu sản phẩm máy in.",
+      "data_type": "string",
+      "possible_values": []
+    },
+    "Khổ giấy": {
+      "description": "Các giá trị khổ giấy dùng để tìm kiếm, lọc và hiểu sản phẩm máy in.",
+      "data_type": "string",
+      "possible_values": [
+        "A4",
+        "A5",
+        "Executive",
+        "F4A (216 x 343 mm)",
+        "Foolscap",
+        "Foolscap (216 x 330 mm)",
+        "Indian Legal",
+        "Legal",
+        "Legal (216 x 356 mm)",
+        "Legal (India) (215 x 345 mm)",
+        "Letter",
+        "Letter (216 x 279 mm)",
+        "Oficio (216 x 318 mm)",
+        "Oficio (Brazil) (216 x 355 mm)",
+        "Oficio (Mexico) (216 x 341 mm)"
+      ]
+    },
+    "Kết nối": {
+      "description": "Các giá trị kết nối dùng để tìm kiếm, lọc và hiểu sản phẩm máy in.",
+      "data_type": "string",
+      "possible_values": [
+        "Bluetooth",
+        "In bằng điện thoại",
+        "Wi-Fi Direct",
+        "Wifi",
+        "WiFi 2.4 GHz và 5 GHz"
+      ]
+    },
+    "Wifi": {
+      "description": "Các giá trị wifi dùng để tìm kiếm, lọc và hiểu sản phẩm máy in.",
+      "data_type": "string",
+      "possible_values": []
+    }
+  }
+}

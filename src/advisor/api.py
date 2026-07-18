@@ -182,6 +182,21 @@ def _is_waiting(values: dict[str, Any]) -> bool:
     )
 
 
+def _public_questions(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Hide options removed from the current clarification contract."""
+    return [
+        {
+            **question,
+            "options": [
+                option
+                for option in question.get("options", [])
+                if option.get("option_id") != "skip"
+            ],
+        }
+        for question in questions
+    ]
+
+
 def _status_from_values(
     thread_id: UUID, values: dict[str, Any], *, running: bool
 ) -> ThreadStatusResponse:
@@ -197,17 +212,23 @@ def _status_from_values(
     return ThreadStatusResponse(
         thread_id=thread_id,
         status=status,
-        questions=clarification.get("questions", []) if _is_waiting(values) else [],
+        questions=(
+            _public_questions(clarification.get("questions", []))
+            if _is_waiting(values)
+            else []
+        ),
         answer=(values.get("response") or {}).get("answer"),
         selected_products=(values.get("ranking") or {}).get("selected_products", []),
     )
 
 
 def _validate_answers(values: dict[str, Any], submission: ResumeRequest) -> None:
-    questions = (values.get("clarification") or {}).get("questions", [])
+    questions = _public_questions(
+        (values.get("clarification") or {}).get("questions", [])
+    )
     expected = {question["question_id"] for question in questions}
     received = {answer.question_id for answer in submission.answers}
-    if expected != received:
+    if received != expected:
         raise HTTPException(
             status_code=422,
             detail={
@@ -299,7 +320,10 @@ async def _stream_graph(
                         "clarification_required",
                         {
                             "thread_id": thread_id,
-                            "questions": interrupt_payload.get("questions", []),
+                            "message": interrupt_payload.get("message", ""),
+                            "questions": _public_questions(
+                                interrupt_payload.get("questions", [])
+                            ),
                         },
                     )
 
@@ -312,7 +336,10 @@ async def _stream_graph(
                     "clarification_required",
                     {
                         "thread_id": thread_id,
-                        "questions": values["clarification"]["questions"],
+                        "message": values["clarification"].get("message", ""),
+                        "questions": _public_questions(
+                            values["clarification"]["questions"]
+                        ),
                     },
                 )
             elif (values.get("control") or {}).get("stage") == "completed":
@@ -412,6 +439,8 @@ def create_app(
                     raise AdvisorConfigurationError(
                         "Qdrant payload indexes are missing: "
                         + ", ".join(sorted(missing))
+                        + ". Run `PYTHONPATH=src .venv/bin/python -m "
+                        "advisor.categories.refrigerator.setup_indexes --apply`."
                     )
             async with open_async_sqlite_checkpointer(app_settings) as checkpointer:
                 application.state.graph = build_graph(

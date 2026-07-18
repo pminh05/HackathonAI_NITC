@@ -10,34 +10,32 @@ required_profile_fields:
   - usage_preferences
 
 payload_fields:
-  brand: metadata.brand
-  style: metadata.kieu_dang_chuan
-  original_price: metadata.gia_goc_vnd
-  promotional_price: metadata.gia_khuyen_mai_vnd
-  capacity: metadata.dung_tich_su_dung_lit
-  people_min: metadata.so_nguoi_min
-  people_max: metadata.so_nguoi_max
-  width: metadata.ngang_cm
-  height: metadata.cao_cm
-  depth: metadata.sau_cm
-  inverter: metadata.co_inverter
-  external_water: metadata.co_lay_nuoc_ngoai
-  automatic_mode: metadata.co_che_do_tu_dong
+  style: 'metadata."Kiểu dáng chuẩn"'
+  original_price: 'metadata."Giá gốc vnd"'
+  promotional_price: 'metadata."Giá khuyến mãi vnd"'
+  capacity: 'metadata."Dung tích sử dụng lít"'
+  people_min: 'metadata."Số người tối thiểu"'
+  people_max: 'metadata."Số người tối đa"'
+  width: 'metadata."Ngang cm"'
+  height: 'metadata."Cao cm"'
+  depth: 'metadata."Sâu cm"'
+  inverter: 'metadata."Có inverter"'
+  external_water: 'metadata."Có lấy nước ngoài"'
+  automatic_mode: 'metadata."Có chế độ tự động"'
 
 payload_indexes:
-  metadata.brand: keyword
-  metadata.kieu_dang_chuan: keyword
-  metadata.gia_goc_vnd: integer
-  metadata.gia_khuyen_mai_vnd: integer
-  metadata.dung_tich_su_dung_lit: integer
-  metadata.so_nguoi_min: integer
-  metadata.so_nguoi_max: integer
-  metadata.ngang_cm: integer
-  metadata.cao_cm: integer
-  metadata.sau_cm: integer
-  metadata.co_inverter: bool
-  metadata.co_lay_nuoc_ngoai: bool
-  metadata.co_che_do_tu_dong: bool
+  'metadata."Kiểu dáng chuẩn"': keyword
+  'metadata."Giá gốc vnd"': integer
+  'metadata."Giá khuyến mãi vnd"': integer
+  'metadata."Dung tích sử dụng lít"': integer
+  'metadata."Số người tối thiểu"': integer
+  'metadata."Số người tối đa"': integer
+  'metadata."Ngang cm"': float
+  'metadata."Cao cm"': float
+  'metadata."Sâu cm"': float
+  'metadata."Có inverter"': bool
+  'metadata."Có lấy nước ngoài"': bool
+  'metadata."Có chế độ tự động"': bool
 
 question_catalog:
   household_size:

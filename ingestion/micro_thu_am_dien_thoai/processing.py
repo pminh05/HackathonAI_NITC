@@ -13,7 +13,7 @@ DATASET = "micro_thu_am_dien_thoai"
 GROUPS = [["Khả năng thu âm",["loai_san_pham_chuan","Tính năng cơ bản","huong_thu_am_chuan","spl_db","tan_so_am_thanh_min_hz","tan_so_am_thanh_max_hz"]],["Tương thích và kết nối",["Tương thích","Kết nối","Cổng tai nghe, headphone","Cổng sạc","bang_tan_min_ghz","bang_tan_max_ghz"]],["Phạm vi và thời lượng",["khoang_cach_truyen_m","thoi_gian_su_dung_min_gio","thoi_gian_su_dung_max_gio","so_chu_ky_sac"]],["Bộ sản phẩm",["so_mic_phat","so_mic_thu","Phụ kiện đi kèm","tong_khoi_luong_cac_bo_phan_g"]]]
 MAX_TOKENS = 480
 BASE_DIR = Path(__file__).resolve().parent
-IMAGE_PATH = str((BASE_DIR.parent.parent / "public" / f"{DATASET}.jpg").resolve())
+IMAGE_PATH = "/public/micro_thu_am_dien_thoai.jpg"
 INPUT_FILE = BASE_DIR / "data" / "micro_thu_am_dien_thoai.json"
 OUTPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed.json"
 

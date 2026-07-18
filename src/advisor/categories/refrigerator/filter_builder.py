@@ -15,6 +15,55 @@ FEATURE_PROFILE_KEYS = {
     "automatic_mode": "automatic_mode",
 }
 
+# Qdrant ``tulanh`` metadata keys that have been normalized and are safe to
+# reference from payload filters. Keep this whitelist in sync with the
+# collection schema so an obsolete/raw metadata key cannot leak into a query.
+STANDARDIZED_METADATA_KEYS = {
+    "Kiểu dáng chuẩn",
+    "Thời gian ra mắt chuẩn",
+    "Năm ra mắt",
+    "Dung tích tổng lít",
+    "Dung tích ngăn đá lít",
+    "Dung tích ngăn lạnh lít",
+    "Dung tích sử dụng lít",
+    "Điện năng kWh năm",
+    "Điện năng kWh ngày",
+    "Số người tối thiểu",
+    "Số người tối đa",
+    "Số cửa chuẩn",
+    "Cao cm",
+    "Ngang cm",
+    "Sâu cm",
+    "Khối lượng máy kg",
+    "Có lấy nước ngoài",
+    "Có chế độ tự động",
+    "Có inverter",
+    "Số công nghệ làm lạnh",
+    "Số công nghệ tiết kiệm điện",
+    "Số công nghệ bảo quản",
+    "Số tiện ích",
+    "Giá gốc vnd",
+    "Giá khuyến mãi vnd",
+    "Tổng dung tích các ngăn đã biết lít",
+    "Tỷ lệ ngăn đá pct",
+    "Điện năng kWh năm mỗi lít",
+    "Phần trăm giảm giá",
+    "Dung tích ngăn chuyển đổi lít",
+}
+
+
+def _metadata_path(key: str) -> str:
+    """Return a Qdrant JSON path with the Vietnamese leaf safely quoted."""
+    return f'metadata."{key}"'
+
+
+def _validate_payload_fields(fields: dict[str, str]) -> None:
+    supported_paths = {_metadata_path(key) for key in STANDARDIZED_METADATA_KEYS}
+    invalid = {path for path in fields.values() if path not in supported_paths}
+    if invalid:
+        joined = ", ".join(sorted(invalid))
+        raise ValueError(f"Unsupported tulanh metadata filter field(s): {joined}")
+
 
 def _range_condition(key: str, **limits: float) -> models.FieldCondition:
     return models.FieldCondition(key=key, range=models.Range(**limits))
@@ -30,6 +79,7 @@ def build_filter(
     constraint, with the sole exception of an open-ended people range.
     """
     fields = payload_fields or load_config()["payload_fields"]
+    _validate_payload_fields(fields)
     must: list[models.Condition] = []
 
     budget_max = need_profile.get("budget_max_vnd")
@@ -60,14 +110,6 @@ def build_filter(
         )
 
     hard = need_profile.get("hard_constraints") or {}
-    brands = [str(value) for value in hard.get("brands", []) if value]
-    if brands:
-        must.append(
-            models.FieldCondition(
-                key=fields["brand"], match=models.MatchAny(any=brands)
-            )
-        )
-
     styles = [str(value) for value in hard.get("styles", []) if value]
     if styles:
         must.append(

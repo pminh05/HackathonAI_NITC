@@ -21,7 +21,7 @@ class ApplicationSettings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
     google_api_key: SecretStr | None = None
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.5-flash"
     qdrant_url: str | None = None
     qdrant_api_key: SecretStr | None = None
     qdrant_timeout_seconds: int = 60
@@ -62,6 +62,61 @@ class IntentLabel(StrEnum):
 
 class IntentResult(BaseModel):
     label: IntentLabel
+
+
+class TurnAction(StrEnum):
+    DISCOVER = "discover"
+    REFINE_NEEDS = "refine_needs"
+    PRODUCT_DETAIL = "product_detail"
+    COMPARE = "compare"
+    EXPLAIN = "explain"
+    MORE_OPTIONS = "more_options"
+    SWITCH_CATEGORY = "switch_category"
+    RESTART_CATEGORY = "restart_category"
+    CONVERSATION = "conversation"
+
+
+class CategoryTransition(StrEnum):
+    INHERIT = "inherit"
+    NEW = "new"
+    SWITCH = "switch"
+
+
+class ExecutionMode(StrEnum):
+    REUSE = "reuse"
+    RERANK = "rerank"
+    RETRIEVE = "retrieve"
+
+
+class TurnAnalysisResult(BaseModel):
+    """One-call interpretation of a natural-language conversation turn."""
+
+    category: IntentLabel
+    category_transition: CategoryTransition = CategoryTransition.INHERIT
+    switch_evidence: str | None = None
+    action: TurnAction = TurnAction.DISCOVER
+    scope: Literal["current_recommendations", "category", "unspecified"] = (
+        "unspecified"
+    )
+    referenced_product_ids: list[str] = Field(default_factory=list, max_length=12)
+    has_profile_update: bool = False
+    direct_reply: str | None = None
+
+
+class ProfilePatch(BaseModel):
+    """Category-owned profile mutations extracted from one user turn.
+
+    Paths are validated by the category patch applier. Keeping the operation
+    buckets generic lets future category handlers expose their own paths without
+    changing the graph contract.
+    """
+
+    set: dict[str, Any] = Field(default_factory=dict)
+    replace: dict[str, Any] = Field(default_factory=dict)
+    add: dict[str, list[Any]] = Field(default_factory=dict)
+    remove: dict[str, list[Any]] = Field(default_factory=dict)
+    clear: list[str] = Field(default_factory=list)
+    evidence: dict[str, str] = Field(default_factory=dict)
 
 
 class RefrigeratorHardConstraints(BaseModel):
@@ -128,7 +183,7 @@ class ClarificationAnswer(BaseModel):
 
 
 class ClarificationSubmission(BaseModel):
-    answers: list[ClarificationAnswer]
+    answers: list[ClarificationAnswer] = Field(min_length=1, max_length=3)
 
     @model_validator(mode="after")
     def reject_duplicate_questions(self) -> ClarificationSubmission:

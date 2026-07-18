@@ -13,7 +13,7 @@ DATASET = "may_tinh_bang"
 GROUPS = [["Hiệu năng",["Chip xử lý (CPU)","Tốc độ CPU","so_nhan_cpu","Chip đồ họa (GPU)","ram_gb"]],["Màn hình",["kich_thuoc_man_hinh_inch","Màn hình hiển thị","Độ phân giải","Tần số quét"]],["Lưu trữ và phần mềm",["bo_nho_luu_tru_gb","bo_nho_kha_dung_gb","Hệ điều hành"]],["Kết nối",["SIM","Mạng di động","Wifi","Bluetooth","GPS","Thực hiện cuộc gọi"]],["Camera và pin",["Tính năng camera sau","Quay phim","Dung lượng pin","Cổng sạc","khoi_luong_g"]]]
 MAX_TOKENS = 480
 BASE_DIR = Path(__file__).resolve().parent
-IMAGE_PATH = str((BASE_DIR.parent.parent / "public" / f"{DATASET}.jpg").resolve())
+IMAGE_PATH = "/public/may_tinh_bang.jpg"
 INPUT_FILE = BASE_DIR / "data" / "may_tinh_bang.json"
 OUTPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed.json"
 

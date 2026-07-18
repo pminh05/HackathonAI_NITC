@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 
-NEED_EXTRACTION_PROMPT = """Bạn là bộ phận hiểu nhu cầu khách hàng mua tủ lạnh.
+NEED_EXTRACTION_PROMPT = """Bạn là bộ phận cập nhật nhu cầu khách hàng mua tủ lạnh.
 
 Tin nhắn hiện tại:
 {user_query}
@@ -14,7 +14,11 @@ Tin nhắn hiện tại:
 Hồ sơ nhu cầu đã biết:
 {current_need_profile}
 
-Hãy trả về hồ sơ đầy đủ sau khi gộp thông tin mới với hồ sơ đã biết.
+Mục đích lượt nói: {turn_action}
+Các câu đang chờ làm rõ: {pending_questions}
+Lịch sử gần nhất: {conversation_history}
+
+Chỉ trả về ProfilePatch mô tả phần thay đổi so với hồ sơ hiện tại.
 
 Quy tắc:
 - Chỉ ghi nhận điều khách hàng nói hoặc suy luận trực tiếp, có căn cứ.
@@ -26,6 +30,16 @@ Quy tắc:
 - required_features chỉ dùng inverter, external_water, automatic_mode.
 - Không tự điền thông tin còn thiếu.
 - Evidence ghi ngắn gọn đoạn lời khách làm căn cứ cho từng thông tin.
+- Dùng set cho scalar; replace khi khách thay toàn bộ list; add/remove cho thay đổi
+  từng phần; clear khi khách chủ động xóa một yêu cầu.
+- Ví dụ “bỏ Panasonic, chuyển sang LG” phải remove/replace Panasonic và đặt LG,
+  không được giữ đồng thời hai brand.
+- Path hợp lệ: household_size, budget_max_vnd, budget_segment,
+  usage_preferences, soft_preferences, implicit_needs,
+  hard_constraints.brands, hard_constraints.styles,
+  hard_constraints.min_capacity_lit, hard_constraints.max_capacity_lit,
+  hard_constraints.max_width_cm, hard_constraints.max_height_cm,
+  hard_constraints.max_depth_cm, hard_constraints.required_features.
 """
 
 
@@ -94,6 +108,10 @@ Quy tắc bắt buộc:
 
 RESPONSE_PROMPT = """Bạn là nhân viên tư vấn tủ lạnh chuyên nghiệp, khách quan và dễ hiểu.
 
+Tin nhắn hiện tại: {user_query}
+Mục đích lượt nói: {turn_action}
+Lịch sử gần nhất: {conversation_history}
+
 Hồ sơ nhu cầu khách hàng:
 {need_profile}
 
@@ -119,11 +137,19 @@ def _json(value: Any) -> str:
 
 
 def build_need_extraction_prompt(
-    user_query: str, current_need_profile: dict[str, Any]
+    user_query: str,
+    current_need_profile: dict[str, Any],
+    *,
+    turn_action: str = "discover",
+    pending_questions: list[dict[str, Any]] | None = None,
+    conversation_history: list[dict[str, str]] | None = None,
 ) -> str:
     return NEED_EXTRACTION_PROMPT.format(
         user_query=user_query,
         current_need_profile=_json(current_need_profile),
+        turn_action=turn_action,
+        pending_questions=_json(pending_questions or []),
+        conversation_history=_json(conversation_history or []),
     )
 
 
@@ -158,6 +184,9 @@ def build_advisory_prompt(context: dict[str, Any]) -> str:
 def build_response_prompt(context: dict[str, Any]) -> str:
     """Build the plain-text prompt whose output can be streamed token by token."""
     return RESPONSE_PROMPT.format(
+        user_query=context.get("user_query", ""),
+        turn_action=context.get("turn_action", "discover"),
+        conversation_history=_json(context.get("conversation_history", [])),
         need_profile=_json(context["need_profile"]),
         selected_products=_json(context["selected_products"]),
     )

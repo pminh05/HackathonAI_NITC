@@ -13,7 +13,7 @@ DATASET = "micro_karaoke"
 GROUPS = [["Kiểu micro và đường truyền",["loai_san_pham_chuan","bang_tan_chuan","loai_du_lieu_tan_so","tan_so_song_min_mhz","tan_so_song_max_mhz"]],["Dải âm thanh",["tan_so_am_thanh_min_hz","tan_so_am_thanh_max_hz","do_meo_tieng_pct","toan_tu_do_meo"]],["Đời sản phẩm",["nam_san_xuat_chuan","Sản xuất tại"]]]
 MAX_TOKENS = 480
 BASE_DIR = Path(__file__).resolve().parent
-IMAGE_PATH = str((BASE_DIR.parent.parent / "public" / f"{DATASET}.jpg").resolve())
+IMAGE_PATH = "/public/micro_karaoke.jpg"
 INPUT_FILE = BASE_DIR / "data" / "micro_karaoke.json"
 OUTPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed.json"
 

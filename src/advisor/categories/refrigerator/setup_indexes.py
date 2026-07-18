@@ -15,6 +15,7 @@ from advisor.schemas import ApplicationSettings
 SCHEMA_TYPES = {
     "keyword": models.PayloadSchemaType.KEYWORD,
     "integer": models.PayloadSchemaType.INTEGER,
+    "float": models.PayloadSchemaType.FLOAT,
     "bool": models.PayloadSchemaType.BOOL,
 }
 

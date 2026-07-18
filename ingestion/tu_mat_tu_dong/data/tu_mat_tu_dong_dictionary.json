@@ -1,0 +1,112 @@
+{
+  "dataset": "tu_mat_tu_dong",
+  "category": "tủ mát tủ đông",
+  "fields": {
+    "Loại sản phẩm": {
+      "description": "Các giá trị loại sản phẩm dùng để tìm kiếm, lọc và hiểu sản phẩm tủ mát tủ đông.",
+      "data_type": "string",
+      "possible_values": [
+        "Tủ mát",
+        "Tủ mát mini",
+        "Tủ đông",
+        "Tủ đông mini"
+      ]
+    },
+    "Công nghệ": {
+      "description": "Các giá trị công nghệ dùng để tìm kiếm, lọc và hiểu sản phẩm tủ mát tủ đông.",
+      "data_type": "string",
+      "possible_values": [
+        "Công nghệ Extra Freezing",
+        "Công nghệ Fan Cooling",
+        "Công nghệ làm lạnh Air Cooling",
+        "Công nghệ làm lạnh Nofrost",
+        "Công nghệ làm mát đa chiều 360 độ",
+        "Công nghệ lạnh sâu đa chiều 360 độ",
+        "Dàn lạnh 5 chiều, làm lạnh 3D",
+        "Hệ thống làm lạnh 360 độ",
+        "Khả năng tùy chỉnh 3 chế độ",
+        "Làm lạnh 3D",
+        "Làm lạnh 5D",
+        "Làm lạnh gián tiếp (không đóng tuyết)",
+        "Làm lạnh quạt",
+        "Làm lạnh trực tiếp",
+        "Làm lạnh trực tiếp (có đóng tuyết)",
+        "Nano bạc kháng khuẩn",
+        "Ngăn Hygiene Box dự trữ thực phẩm chế biến trong ngày",
+        "Quạt đối lưu",
+        "Thành trong tủ phủ lớp bạc kháng khuẩn Ag+",
+        "Vật liệu xốp cách nhiệt giữ đông 100h không cần điện",
+        "Đối lưu cưỡng bức"
+      ]
+    },
+    "Công nghệ tiết kiệm điện": {
+      "description": "Các giá trị công nghệ tiết kiệm điện dùng để tìm kiếm, lọc và hiểu sản phẩm tủ mát tủ đông.",
+      "data_type": "string",
+      "possible_values": [
+        "Inverter",
+        "Smart Inverter"
+      ]
+    },
+    "Tiện ích": {
+      "description": "Các giá trị tiện ích dùng để tìm kiếm, lọc và hiểu sản phẩm tủ mát tủ đông.",
+      "data_type": "string",
+      "possible_values": [
+        "4 khay đựng",
+        "5 khay đựng",
+        "Bánh xe",
+        "Bánh xe (có khoá)",
+        "Bánh xe (có khóa 2 bánh trước)",
+        "Bảng điều khiển",
+        "Chân tủ có thể điều chỉnh độ cao",
+        "Công nghệ làm mát các ngăn kệ tủ, giúp tủ mát nhanh hơn",
+        "Cảnh báo nhiệt độ bất thường",
+        "Cửa kính",
+        "Cửa tự đóng",
+        "Dễ dàng chuyển đổi chế độ tủ mát/tủ đông",
+        "Giỏ đựng đồ",
+        "Hệ thống thoát nước tự động",
+        "Hộc chứa dây điện",
+        "Hộp đèn LED",
+        "Inverter tiết kiệm điện",
+        "Khay đựng đồ",
+        "Khoá cửa tủ",
+        "Kháng khuẩn, khử mùi",
+        "Khóa cửa tủ",
+        "Kẹp đỡ vỉ trợ lực lên đến 30 kg",
+        "Làm lạnh nhanh",
+        "Làm đá nhanh",
+        "Lỗ thoát nước",
+        "Nút điều chỉnh nhiệt độ bên ngoài tủ",
+        "Nút điều khiển nhiệt độ bên ngoài tủ",
+        "Tủ có sức chứa 6 kệ và 1 hộc tủ giúp tiện lợi bảo quản thực phẩm",
+        "Xẻng cạo tuyết",
+        "Đèn báo nhiệt độ bất thường",
+        "Đèn LED",
+        "Đồng hồ điện tử"
+      ]
+    },
+    "Chất liệu mặt": {
+      "description": "Các giá trị chất liệu mặt dùng để tìm kiếm, lọc và hiểu sản phẩm tủ mát tủ đông.",
+      "data_type": "string",
+      "possible_values": [
+        "Có",
+        "Công nghệ kính Low-E",
+        "Không có kính",
+        "Kính 2 lớp",
+        "Kính cách nhiệt Low-E",
+        "Kính cường lực",
+        "Kính cường lực 2 lớp",
+        "Kính cường lực dày 5 mm"
+      ]
+    },
+    "Loại Gas": {
+      "description": "Các giá trị loại gas dùng để tìm kiếm, lọc và hiểu sản phẩm tủ mát tủ đông.",
+      "data_type": "string",
+      "possible_values": [
+        "R134a",
+        "R290",
+        "R600a"
+      ]
+    }
+  }
+}

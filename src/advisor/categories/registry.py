@@ -11,8 +11,10 @@ class CategoryDefinition(BaseModel):
     """Location metadata for an independently implemented category."""
 
     name: str
+    display_name: str = ""
     package_path: str
     config_path: Path
+    implemented: bool = True
 
 
 class CategoryRegistry:
@@ -40,6 +42,7 @@ def build_default_registry() -> CategoryRegistry:
     registry.register(
         CategoryDefinition(
             name="refrigerator",
+            display_name="Tủ Lạnh",
             package_path="advisor.categories.refrigerator",
             config_path=Path(__file__).with_name("refrigerator") / "config.yaml",
         )

@@ -15,8 +15,10 @@ from advisor.schemas import (
     CustomAnswerInterpretation,
     IntentLabel,
     IntentResult,
+    ProfilePatch,
     RankingResult,
     RefrigeratorNeedExtraction,
+    TurnAnalysisResult,
     ApplicationSettings,
 )
 
@@ -27,6 +29,15 @@ class FakeStructuredModel:
         self.schema = schema
 
     def invoke(self, _: str) -> Any:
+        if self.schema is TurnAnalysisResult:
+            return TurnAnalysisResult(
+                category=IntentLabel.REFRIGERATOR,
+                category_transition="new",
+                action="discover",
+                has_profile_update=True,
+            )
+        if self.schema is ProfilePatch:
+            return ProfilePatch()
         if self.schema is IntentResult:
             return IntentResult(label=IntentLabel.REFRIGERATOR)
         if self.schema is RefrigeratorNeedExtraction:
@@ -87,11 +98,11 @@ class FakeQdrant:
                         "text": "Tủ lạnh 350 lít có Inverter.",
                         "metadata": {
                             "brand": "Test",
-                            "gia_goc_vnd": 18_000_000,
-                            "gia_khuyen_mai_vnd": 15_000_000,
-                            "dung_tich_su_dung_lit": 350,
+                            "Giá gốc vnd": 18_000_000,
+                            "Giá khuyến mãi vnd": 15_000_000,
+                            "Dung tích sử dụng lít": 350,
                             "Số người sử dụng": "3 - 4 người",
-                            "co_inverter": True,
+                            "Có inverter": True,
                         },
                     },
                 )
@@ -175,6 +186,9 @@ def test_chat_interrupt_status_resume_and_duplicate_resume(tmp_path: Any) -> Non
         resumed_events = parse_sse(resumed.text)
         assert resumed_events[-1][0] == "completed"
         assert resumed_events[-1][1]["answer"] == "Đây là câu trả lời tư vấn từ API."
+        assert "".join(
+            data["delta"] for event, data in resumed_events if event == "token"
+        ) == "Đây là câu trả lời tư vấn từ API."
         assert resumed_events[-1][1]["selected_products"][0]["product_id"] == "sku-api"
 
         duplicate = client.post(
@@ -221,6 +235,30 @@ def test_pending_thread_survives_app_restart(tmp_path: Any) -> None:
             },
         )
         assert parse_sse(result.text)[-1][0] == "completed"
+
+
+def test_resume_rejects_partial_form(
+    tmp_path: Any,
+) -> None:
+    application = create_app(
+        api_settings(tmp_path), llm=FakeLLM(), qdrant_client=FakeQdrant()
+    )
+    with TestClient(application) as client:
+        events = parse_sse(
+            client.post("/chat", json={"message": "Tư vấn tủ lạnh"}).text
+        )
+        thread_id = events[0][1]["thread_id"]
+        partial = client.post(
+            f"/chat/{thread_id}/resume",
+            json={
+                "answers": [
+                    {"question_id": "household_size", "option_id": "three_four"}
+                ]
+            },
+        )
+        assert partial.status_code == 422
+        assert partial.json()["detail"]["code"] == "invalid_answers"
+        assert partial.json()["detail"]["missing"] == ["budget", "usage_preferences"]
 
 
 class FakeStreamingGraph:

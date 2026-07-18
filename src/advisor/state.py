@@ -10,6 +10,8 @@ from langgraph.graph.message import add_messages
 
 class AdvisorState(TypedDict, total=False):
     messages: Annotated[list[AnyMessage], add_messages]
+    conversation: dict[str, Any]
+    category_contexts: dict[str, dict[str, Any]]
     routing: dict[str, Any]
     need_profile: dict[str, Any]
     clarification: dict[str, Any]

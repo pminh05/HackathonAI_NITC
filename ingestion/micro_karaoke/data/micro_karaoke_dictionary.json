@@ -1,0 +1,32 @@
+{
+  "dataset": "micro_karaoke",
+  "category": "micro karaoke",
+  "fields": {
+    "Loại sản phẩm": {
+      "description": "Các giá trị loại sản phẩm dùng để tìm kiếm, lọc và hiểu sản phẩm micro karaoke.",
+      "data_type": "string",
+      "possible_values": [
+        "Có dây",
+        "Không dây"
+      ]
+    },
+    "Băng tần": {
+      "description": "Các giá trị băng tần dùng để tìm kiếm, lọc và hiểu sản phẩm micro karaoke.",
+      "data_type": "string",
+      "possible_values": [
+        "2.4 GHz",
+        "UHF"
+      ]
+    },
+    "loai_du_lieu_tan_so": {
+      "description": "Các giá trị loai_du_lieu_tan_so dùng để tìm kiếm, lọc và hiểu sản phẩm micro karaoke.",
+      "data_type": "string",
+      "possible_values": []
+    },
+    "toan_tu_do_meo": {
+      "description": "Các giá trị toan_tu_do_meo dùng để tìm kiếm, lọc và hiểu sản phẩm micro karaoke.",
+      "data_type": "string",
+      "possible_values": []
+    }
+  }
+}
