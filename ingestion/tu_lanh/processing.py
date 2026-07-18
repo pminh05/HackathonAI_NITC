@@ -1,4 +1,4 @@
-import json
+﻿import json
 import re
 import sys
 from pathlib import Path
@@ -11,6 +11,7 @@ except ImportError:
 
 input_file = Path(r"data\tu_lanh.json")
 output_file = Path(r"data\tu_lanh_processed.json")
+IMAGE_PATH = str((Path(__file__).resolve().parents[2] / "public" / "tu_lanh.jpg").resolve())
 
 MAX_TOKENS = 450
 
@@ -515,6 +516,7 @@ def main():
                 "id": product_id,
                 "name": name,
                 "text": semantic_text,
+                "image_path": IMAGE_PATH,
                 "metadata": create_metadata(
                     product=product,
                     source_index=index,
@@ -551,3 +553,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

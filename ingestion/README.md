@@ -1,175 +1,113 @@
 # Ingestion Pipeline
 
-Pipeline xử lý dữ liệu sản phẩm để đưa vào Qdrant phục vụ RAG.
+Pipeline làm sạch, phân phối, xử lý semantic, embedding và đưa dữ liệu sản phẩm vào Qdrant phục vụ RAG.
 
-## Cấu trúc thư mục
+## Luồng dữ liệu tổng thể
 
-```
-ingestion/
-├── <category>/
-│   ├── data/
-│   │   ├── <dataset>.json
-│   │   ├── <dataset>_processed.json
-│   │   ├── <dataset>_processed_vi.json
-│   │   ├── <dataset>_dictionary.json
-│   │   └── <dataset>_embedded.json
-│   ├── processing.py
-│   ├── changeName.py
-│   ├── dictionary.py
-│   ├── embedding.py
-│   └── qdrant.py
-└── README.md
+```text
+clean_data/Spec_cate_gia.xlsx
+        ↓ chỉnh sửa thủ công số liệu lỗi
+clean_data/Clean_data.xlsx
+        ↓ tách dữ liệu theo danh mục bằng clean_data/Final.ipynb
+clean_data/Final/<Tên thiết bị>.xlsx
+        ↓ xuất JSON
+clean_data/Final_json/<Tên thiết bị>.json
+        ↓ chạy clean_data/distribute_final_json.py
+<ten_thiet_bi>/data/<ten_thiet_bi>.json
+        ↓ processing.py → changeName.py → dictionary.py → embedding.py → qdrant.py
+Qdrant
 ```
 
----
+## 1. Làm sạch dữ liệu thủ công
 
-# Quy trình xử lý
+File đầu vào là:
 
-Chạy các script theo đúng thứ tự:
-
-```
-processing.py
-      ↓
-changeName.py
-      ↓
-dictionary.py
-      ↓
-embedding.py
-      ↓
-qdrant.py
+```text
+clean_data/Spec_cate_gia.xlsx
 ```
 
----
+Kiểm tra và chỉnh tay các số liệu sai, thiếu đơn vị hoặc sai định dạng. Lưu kết quả vào:
 
-## 1. processing.py
-
-Đọc dữ liệu gốc
-
-```
-data/<dataset>.json
+```text
+clean_data/Clean_data.xlsx
 ```
 
-Chuẩn hóa dữ liệu:
+Không chỉnh trực tiếp các JSON trong folder thiết bị vì chúng được tạo lại ở các bước sau.
 
-- Làm sạch metadata
-- Sinh trường `text`
-- Chuẩn hóa cấu trúc dữ liệu
+## 2. Tách dữ liệu và xuất JSON
 
-Output:
+Chạy notebook:
 
-```
-data/<dataset>_processed.json
+```text
+clean_data/Final.ipynb
 ```
 
----
+Notebook đọc `Clean_data.xlsx`, tách dữ liệu theo danh mục vào `clean_data/Final`, sau đó xuất JSON tiếng Việt vào `clean_data/Final_json`.
 
-## 2. changeName.py
+## 3. Đổi tên và phân phối JSON
 
-Đổi tên các thuộc tính metadata từ tiếng Anh sang tiếng Việt.
+Chạy từ thư mục `ingestion`:
 
-Ví dụ:
-
-```
-ram_gb
-↓
-RAM GB
+```powershell
+python clean_data/distribute_final_json.py --dry-run
+python clean_data/distribute_final_json.py
 ```
 
-Output:
+`--dry-run` kiểm tra đủ 14 file, kiểm tra cú pháp JSON và hiển thị đích đến nhưng không ghi file. Khi chạy thật, script đổi tên và phân phối theo mapping cố định, ví dụ:
 
+```text
+Máy lạnh.json              → may_lanh/data/may_lanh.json
+Đồng hồ thông minh.json    → dong_ho_thong_minh/data/dong_ho_thong_minh.json
+Tủ mát, tủ đông.json       → tu_mat_tu_dong/data/tu_mat_tu_dong.json
 ```
-data/<dataset>_processed_vi.json
+
+Nếu xuất hiện file JSON không có trong mapping hoặc thiếu một danh mục, script dừng trước khi thay dữ liệu đích.
+
+## 4. Chạy pipeline cho từng thiết bị
+
+Ví dụ với máy lạnh:
+
+```powershell
+python may_lanh/processing.py
+python may_lanh/changeName.py
+python may_lanh/dictionary.py
+python may_lanh/embedding.py
+python may_lanh/qdrant.py
 ```
 
----
+Thứ tự và output:
 
-## 3. dictionary.py
+| Bước | Input | Output |
+|---|---|---|
+| `processing.py` | `<dataset>.json` | `<dataset>_processed.json` |
+| `changeName.py` | `<dataset>_processed.json` | `<dataset>_processed_vi.json` |
+| `dictionary.py` | `<dataset>_processed_vi.json` | `<dataset>_dictionary.json` |
+| `embedding.py` | `<dataset>_processed_vi.json` | `<dataset>_embedded.json` |
+| `qdrant.py` | `<dataset>_embedded.json` | Collection trên Qdrant |
 
-Sinh dictionary mô tả các trường metadata.
-
-Ví dụ:
+`processing.py` tạo `text` semantic tối đa 480 token và thêm `image_path` ở cấp đối tượng. Ví dụ:
 
 ```json
 {
-    "RAM GB": {
-        "description": "...",
-        "possible_values": [...]
-    }
+  "id": "...",
+  "name": "...",
+  "text": "...",
+  "image_path": "D:\\HackathonAI_NITC\\public\\may_lanh.jpg",
+  "metadata": {}
 }
 ```
 
-Output:
+Đường dẫn ảnh được tính từ vị trí project, không phụ thuộc thư mục hiện hành khi chạy lệnh.
 
-```
-data/<dataset>_dictionary.json
-```
+## Cấu hình
 
----
+- Ảnh danh mục nằm trong `D:\HackathonAI_NITC\public` và có tên trùng dataset.
+- Model embedding: `intfloat/multilingual-e5-small` hoặc bản model local đã cấu hình.
+- Trước khi chạy `qdrant.py`, khai báo `QDRANT_URL` và `QDRANT_API_KEY` trong môi trường hoặc file `.env`.
 
-## 4. embedding.py
+## Lưu ý vận hành
 
-Sinh vector embedding cho toàn bộ dữ liệu.
-
-Input:
-
-```
-data/<dataset>_processed_vi.json
-```
-
-Output:
-
-```
-data/<dataset>_embedded.json
-```
-
-### Model
-
-Project sử dụng model:
-
-```
-models/
-└── multilingual-e5-small/
-```
-
-Model cần được tải trước khi chạy.
-
----
-
-## 5. qdrant.py
-
-Upload dữ liệu đã embedding lên Qdrant.
-
-Input:
-
-```
-data/<dataset>_embedded.json
-```
-
-Output:
-
-- Collection trên Qdrant
-
----
-
-# File dữ liệu
-
-| File                          | Vai trò                         |
-| ----------------------------- | ------------------------------- |
-| `<dataset>.json`              | Dữ liệu gốc                     |
-| `<dataset>_processed.json`    | Dữ liệu đã chuẩn hóa            |
-| `<dataset>_processed_vi.json` | Metadata đã đổi sang tiếng Việt |
-| `<dataset>_dictionary.json`   | Dictionary thuộc tính           |
-| `<dataset>_embedded.json`     | Dữ liệu đã embedding            |
-
----
-
-# Lưu ý
-
-- Luôn chạy đúng thứ tự các script.
-- Model `multilingual-e5-small` phải được tải sẵn trong thư mục:
-
-```
-models/multilingual-e5-small/
-```
-
-- Cần cấu hình Qdrant (`QDRANT_URL`, `QDRANT_API_KEY`, `COLLECTION_NAME`) trước khi chạy `qdrant.py`.
+- Luôn chạy `distribute_final_json.py --dry-run` trước khi ghi đè dữ liệu category.
+- Sau khi sửa `Clean_data.xlsx`, phải chạy lại bước tách/xuất JSON và phân phối.
+- Chạy các script category đúng thứ tự; không chạy embedding trước processing.
+- `qdrant.py` dùng upsert nên cùng một SKU sẽ cập nhật point hiện có.

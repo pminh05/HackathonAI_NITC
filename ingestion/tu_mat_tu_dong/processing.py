@@ -1,4 +1,4 @@
-import json
+﻿import json
 import re
 import sys
 from pathlib import Path
@@ -13,6 +13,7 @@ DATASET = "tu_mat_tu_dong"
 GROUPS = [["Loại tủ và sức chứa",["loai_san_pham_chuan","dung_tich_tong_lit","tong_so_ngan","so_ngan_dong","so_ngan_mat","dung_tich_ngan_dong_mem_lit"]],["Nhiệt độ và làm lạnh",["nhiet_do_min_c","nhiet_do_max_c","Công nghệ","loai_gas_chuan"]],["Tiết kiệm và vận hành",["co_inverter","dien_nang_kwh_ngay","dien_nang_kwh_nam","do_on_min_db","do_on_max_db","Tiện ích"]],["Thiết kế",["so_cua_chuan","Chất liệu mặt","Chất liệu ruột","cao_cm","ngang_cm","sau_cm","khoi_luong_may_kg"]]]
 MAX_TOKENS = 480
 BASE_DIR = Path(__file__).resolve().parent
+IMAGE_PATH = str((BASE_DIR.parent.parent / "public" / f"{DATASET}.jpg").resolve())
 INPUT_FILE = BASE_DIR / "data" / "tu_mat_tu_dong.json"
 OUTPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed.json"
 
@@ -140,6 +141,7 @@ def main():
             "id": sku,
             "name": f"{CATEGORY} {brand} {sku}",
             "text": create_semantic_text(product, sku),
+            "image_path": IMAGE_PATH,
             "metadata": create_metadata(product, index),
         })
 
@@ -152,3 +154,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
