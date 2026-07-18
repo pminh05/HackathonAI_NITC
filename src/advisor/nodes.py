@@ -5,11 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import threading
+import unicodedata
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from langchain_core.messages import AIMessage, HumanMessage
+import yaml
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableLambda
 from langchain_core.utils.json import parse_json_markdown
 from langgraph.types import interrupt
@@ -141,28 +144,49 @@ def _normalize_fpt_turn_analysis(value: Any) -> TurnAnalysisResult:
     )
 
 
-def _parse_markdown_field_list(text: str) -> dict[str, Any]:
-    """Parse Qwen's occasional ``- **field**: value`` structured response."""
-    import re
-
-    result: dict[str, Any] = {}
-    pattern = re.compile(
-        r"^\s*[-*]\s+(?:\*\*)?([A-Za-z_][A-Za-z0-9_]*)(?:\*\*)?\s*:\s*(.*?)\s*$"
+def _markdown_mapping_to_yaml(text: str) -> str:
+    """Turn Qwen's bold Markdown field lists into a YAML mapping."""
+    lines: list[str] = []
+    field_pattern = re.compile(
+        r"^(\s*)[-*]\s+(?:\*\*)?([A-Za-z_][A-Za-z0-9_]*)(?:\*\*)?\s*:(.*)$"
+    )
+    bold_pattern = re.compile(
+        r"^(\s*)(?:\*\*)?([A-Za-z_][A-Za-z0-9_]*)(?:\*\*)\s*:(.*)$"
     )
     for line in text.splitlines():
-        match = pattern.match(line)
-        if not match:
+        match = field_pattern.match(line)
+        if match:
+            indent, key, remainder = match.groups()
+            # A leading bullet at column zero represents a top-level field.
+            # Indented bullets are preserved because they usually start a list item.
+            prefix = "" if not indent else f"{indent}- "
+            lines.append(f"{prefix}{key}:{remainder}")
             continue
-        key, raw_value = match.groups()
-        value_text = raw_value.strip().strip("`")
-        try:
-            value = json.loads(value_text)
-        except json.JSONDecodeError:
-            value = value_text
-        result[key] = value
-    if not result:
-        raise ValueError("FPT structured output was neither JSON nor a field list")
-    return result
+        match = bold_pattern.match(line)
+        if match:
+            indent, key, remainder = match.groups()
+            lines.append(f"{indent}{key}:{remainder}")
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _parse_structured_text(text: str) -> dict[str, Any]:
+    """Parse JSON, fenced JSON, or Qwen's Markdown/YAML mapping output."""
+    try:
+        parsed = parse_json_markdown(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        parsed = yaml.safe_load(_markdown_mapping_to_yaml(text))
+    except yaml.YAMLError as exc:
+        raise ValueError("FPT structured output is not valid JSON or YAML") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("FPT structured output must be an object mapping")
+    return parsed
 
 
 def _raw_message_text(message: Any) -> str:
@@ -178,6 +202,209 @@ def _raw_message_text(message: Any) -> str:
     return str(content)
 
 
+def _tool_call_arguments(message: Any) -> dict[str, Any] | None:
+    """Extract arguments from LangChain- or OpenAI-shaped tool calls."""
+    for tool_call in getattr(message, "tool_calls", None) or []:
+        args = tool_call.get("args") if isinstance(tool_call, dict) else None
+        if isinstance(args, dict):
+            return args
+        if isinstance(args, str):
+            try:
+                parsed = json.loads(args)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+
+    additional = getattr(message, "additional_kwargs", None) or {}
+    for tool_call in additional.get("tool_calls", []) or []:
+        function = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+        args = function.get("arguments")
+        if isinstance(args, dict):
+            return args
+        if isinstance(args, str):
+            try:
+                parsed = json.loads(args)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+    return None
+
+
+def _normalize_custom_answer(value: dict[str, Any]) -> dict[str, Any]:
+    """Normalize common status/confidence aliases without inventing user data."""
+    data = dict(value)
+    raw_status = str(
+        data.get("interpretation_status") or data.get("status") or ""
+    ).strip().casefold()
+    status_aliases = {
+        "understood": "mapped",
+        "matched": "mapped",
+        "resolved": "mapped",
+        "custom": "custom_value",
+        "free_text": "custom_value",
+        "partial": "partially_understood",
+        "partially understood": "partially_understood",
+        "unknown": "unresolved",
+        "not_understood": "unresolved",
+        "none": "unresolved",
+    }
+    if raw_status:
+        data["interpretation_status"] = status_aliases.get(raw_status, raw_status)
+
+    confidence = data.get("confidence")
+    if isinstance(confidence, str):
+        text = confidence.strip().rstrip("%")
+        try:
+            numeric = float(text)
+        except ValueError:
+            pass
+        else:
+            data["confidence"] = numeric / 100 if "%" in confidence else numeric
+    return data
+
+
+def _normalize_empty_collections(
+    value: dict[str, Any], schema: type[BaseModel]
+) -> dict[str, Any]:
+    """Repair only empty mapping/list mismatches that carry no information."""
+    data = dict(value)
+    for name, field_info in schema.model_fields.items():
+        if data.get(name) != {}:
+            continue
+        default = field_info.get_default(call_default_factory=True)
+        if isinstance(default, list):
+            data[name] = []
+    return data
+
+
+def _flatten_profile_values(
+    value: dict[str, Any], prefix: str = ""
+) -> dict[str, Any]:
+    flattened: dict[str, Any] = {}
+    for name, nested in value.items():
+        path = f"{prefix}.{name}" if prefix else name
+        if isinstance(nested, dict) and nested:
+            flattened.update(_flatten_profile_values(nested, path))
+        else:
+            flattened[path] = nested
+    return flattened
+
+
+def _normalize_profile_patch(value: dict[str, Any]) -> dict[str, Any]:
+    """Recover Qwen's occasional direct-profile response as patch operations."""
+    operation_names = {"set", "replace", "add", "remove", "clear"}
+    if operation_names.intersection(value):
+        return value
+
+    direct_values = {
+        name: item for name, item in value.items() if name != "evidence"
+    }
+    if not direct_values:
+        return value
+    flattened = _flatten_profile_values(direct_values)
+    scalar_values = {
+        path: item for path, item in flattened.items() if not isinstance(item, list)
+    }
+    list_values = {
+        path: item for path, item in flattened.items() if isinstance(item, list)
+    }
+    evidence = value.get("evidence")
+    return {
+        "set": scalar_values,
+        "replace": list_values,
+        "evidence": (
+            {
+                str(path): str(quote)
+                for path, quote in evidence.items()
+                if isinstance(quote, str)
+            }
+            if isinstance(evidence, dict)
+            else {}
+        ),
+    }
+
+
+def _parse_ranking_markdown(text: str) -> dict[str, Any] | None:
+    """Recover Qwen's numbered Reason/Trade-off ranking format."""
+    item_pattern = re.compile(
+        r"(?ims)^\s*\d+[.)]\s+(?:\*\*)?(?P<product_id>[A-Za-z0-9_.:/-]+)"
+        r"(?:\*\*)?[^\n]*\n"
+        r"\s*[-*]\s*\**(?:reason|lý do)\s*:\**\s*(?P<reason>[^\n]+)\n"
+        r"\s*[-*]\s*\**(?:trade[- _]?off|đánh đổi)\s*:\**\s*"
+        r"(?P<trade_off>[^\n]+)"
+    )
+    selected = [
+        {
+            "product_id": match.group("product_id").strip(),
+            "reason": match.group("reason").strip(),
+            "trade_off": match.group("trade_off").strip(),
+        }
+        for match in item_pattern.finditer(text)
+    ]
+    return {"selected_products": selected} if selected else None
+
+
+def _fpt_structured_output_contract(schema: type[BaseModel]) -> str:
+    """Make the output contract explicit for endpoints ignoring response_format."""
+    json_schema = json.dumps(
+        schema.model_json_schema(), ensure_ascii=False, separators=(",", ":")
+    )
+    return (
+        "YÊU CẦU ĐỊNH DẠNG BẮT BUỘC CHO ĐẦU RA: Chỉ trả đúng một JSON object "
+        "hợp lệ; không Markdown, không code fence, không văn xuôi trước hoặc sau. "
+        "Giữ chính xác tên field và enum trong JSON Schema; không đổi tên field "
+        "và không thêm field thay thế. JSON Schema:\n"
+        f"{json_schema}"
+    )
+
+
+def _add_fpt_structured_output_contract(
+    value: Any, schema: type[BaseModel]
+) -> list[BaseMessage]:
+    """Preserve chat input while adding a provider-specific system contract."""
+    contract = SystemMessage(content=_fpt_structured_output_contract(schema))
+    if isinstance(value, str):
+        return [contract, HumanMessage(content=value)]
+    if isinstance(value, BaseMessage):
+        return [contract, value]
+    if isinstance(value, (list, tuple)) and all(
+        isinstance(item, BaseMessage) for item in value
+    ):
+        messages = list(value)
+        # Keep the trusted guardrail system message first when present.
+        insert_at = 1 if messages and isinstance(messages[0], SystemMessage) else 0
+        messages.insert(insert_at, contract)
+        return messages
+    to_messages = getattr(value, "to_messages", None)
+    if callable(to_messages):
+        return _add_fpt_structured_output_contract(to_messages(), schema)
+    return [contract, HumanMessage(content=str(value))]
+
+
+def _validate_fpt_structured_value(
+    parsed: Any, schema: type[BaseModel]
+) -> BaseModel:
+    if isinstance(parsed, schema):
+        return parsed
+    if schema is TurnAnalysisResult:
+        return _normalize_fpt_turn_analysis(parsed)
+    if schema is RankingResult and isinstance(parsed, list):
+        parsed = {"selected_products": parsed}
+    if not isinstance(parsed, dict):
+        raise ValueError("FPT structured output must be an object mapping")
+    if schema is ProfilePatch:
+        parsed = _normalize_profile_patch(parsed)
+        operation_names = {"set", "replace", "add", "remove", "clear"}
+        if parsed and not operation_names.intersection(parsed):
+            raise ValueError("FPT ProfilePatch did not contain any patch operation")
+    if "interpretation_status" in schema.model_fields:
+        parsed = _normalize_custom_answer(parsed)
+    parsed = _normalize_empty_collections(parsed, schema)
+    return schema.model_validate(parsed)
+
+
 def _parse_fpt_structured_result(
     result: Any, schema: type[BaseModel]
 ) -> BaseModel:
@@ -185,14 +412,16 @@ def _parse_fpt_structured_result(
     parsed = result.get("parsed") if isinstance(result, dict) else None
     if parsed is None:
         raw = result.get("raw") if isinstance(result, dict) else result
-        text = _raw_message_text(raw).strip()
-        try:
-            parsed = parse_json_markdown(text)
-        except (json.JSONDecodeError, ValueError):
-            parsed = _parse_markdown_field_list(text)
-    if schema is TurnAnalysisResult:
-        return _normalize_fpt_turn_analysis(parsed)
-    return schema.model_validate(parsed)
+        parsed = _tool_call_arguments(raw)
+        if parsed is None:
+            text = _raw_message_text(raw).strip()
+            try:
+                parsed = _parse_structured_text(text)
+            except ValueError:
+                parsed = _parse_ranking_markdown(text) if schema is RankingResult else None
+                if parsed is None:
+                    raise
+    return _validate_fpt_structured_value(parsed, schema)
 
 
 TURN_ANALYSIS_PROMPT = """Bạn điều phối một cuộc hội thoại tư vấn sản phẩm nhiều lượt.
@@ -224,6 +453,70 @@ tham chiếu. Quy tắc:
 - conversation chỉ dùng cho chào hỏi/cảm ơn; khi đó có thể trả direct_reply ngắn,
   tự nhiên. Không đưa lời tư vấn sản phẩm vào direct_reply.
 """
+
+
+_CATEGORY_KEYWORDS = {
+    IntentLabel.REFRIGERATOR: ("tủ lạnh",),
+    IntentLabel.AIR_CONDITIONER: ("máy lạnh", "điều hòa"),
+    IntentLabel.WASHING_MACHINE: ("máy giặt",),
+    IntentLabel.DRYER: ("máy sấy", "máy sấy quần áo"),
+    IntentLabel.DISHWASHER: ("máy rửa chén", "máy rửa bát"),
+    IntentLabel.COOLER_FREEZER: ("tủ mát", "tủ đông"),
+    IntentLabel.WATER_HEATER: ("máy nước nóng", "bình nước nóng"),
+    IntentLabel.KARAOKE_MICROPHONE: ("micro karaoke",),
+    IntentLabel.PHONE_RECORDING_MICROPHONE: ("micro thu âm điện thoại",),
+    IntentLabel.SMARTWATCH: ("đồng hồ thông minh", "smartwatch"),
+    IntentLabel.DESKTOP: ("máy tính để bàn", "desktop"),
+    IntentLabel.MONITOR: ("màn hình máy tính", "monitor"),
+    IntentLabel.PRINTER: ("máy in",),
+    IntentLabel.TABLET: ("máy tính bảng", "tablet"),
+}
+
+
+def _searchable_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFD", value.casefold()).replace("đ", "d")
+    return "".join(
+        character
+        for character in normalized
+        if unicodedata.category(character) != "Mn"
+    )
+
+
+def _deterministic_turn_analysis(
+    query: str, current_active: str | None
+) -> TurnAnalysisResult:
+    """Keep routing alive when both structured providers reject their output."""
+    searchable_query = _searchable_text(query)
+    requested = IntentLabel.OTHER
+    for label, keywords in _CATEGORY_KEYWORDS.items():
+        if any(_searchable_text(keyword) in searchable_query for keyword in keywords):
+            requested = label
+            break
+
+    requested_slug = CATEGORY_SLUGS.get(requested)
+    if current_active and requested_slug and requested_slug != current_active:
+        transition = CategoryTransition.SWITCH
+        action = TurnAction.SWITCH_CATEGORY
+        switch_evidence = query
+    elif current_active:
+        transition = CategoryTransition.INHERIT
+        action = TurnAction.REFINE_NEEDS
+        switch_evidence = None
+        if requested is IntentLabel.OTHER:
+            requested = SLUG_LABELS.get(current_active, IntentLabel.OTHER)
+    else:
+        transition = CategoryTransition.NEW
+        action = TurnAction.DISCOVER
+        switch_evidence = None
+
+    return TurnAnalysisResult(
+        category=requested,
+        category_transition=transition,
+        switch_evidence=switch_evidence,
+        action=action,
+        scope="category" if requested is not IntentLabel.OTHER else "unspecified",
+        has_profile_update=True,
+    )
 
 
 def create_gemini_chat_model(settings: ApplicationSettings) -> ChatGoogleGenerativeAI:
@@ -354,14 +647,14 @@ class FallbackChatModel:
     LangChain's ``with_fallbacks`` returns a generic Runnable, so applying it
     directly to Gemini would hide ``with_structured_output``. This facade first
     configures both providers and then composes the fallback. FPT's Marketplace
-    endpoint uses function calling for finite decision schemas. ``ProfilePatch``
-    is routed through native JSON schema instead because Qwen can stall when a
-    function tool contains generic dictionary fields.
+    endpoint may ignore OpenAI ``response_format`` or emit fenced/Markdown JSON,
+    so every Pydantic schema goes through the same explicit output contract,
+    raw-envelope recovery, and final Pydantic validation.
     """
 
     primary: Any | None
     fallback: Any
-    fallback_structured_method: str = "function_calling"
+    fallback_structured_method: str = "json_schema"
     _primary_disabled: bool = field(default=False, init=False, repr=False)
     _primary_lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False
@@ -471,27 +764,44 @@ class FallbackChatModel:
             if self.primary is not None
             else None
         )
-        json_schema_fallback = schema in {ProfilePatch, TurnAnalysisResult}
-        fallback_method = (
-            "json_schema" if json_schema_fallback else self.fallback_structured_method
-        )
+        fallback_method = self.fallback_structured_method
         fallback_kwargs = {
             **kwargs,
             "method": fallback_method,
         }
-        if (
-            fallback_method == "json_schema"
-            and isinstance(schema, type)
-            and issubclass(schema, BaseModel)
-        ):
+        if isinstance(schema, type) and issubclass(schema, BaseModel):
             # Passing a Pydantic class makes the OpenAI SDK parse Qwen's raw
             # response itself. That parser rejects occasional ```json fences.
             # A JSON-schema dict selects LangChain's fence-tolerant parser; the
             # final Runnable restores strict Pydantic validation afterwards.
-            fallback = self.fallback.with_structured_output(
+            fpt_structured = self.fallback.with_structured_output(
                 schema.model_json_schema(), include_raw=True, **fallback_kwargs
-            ) | RunnableLambda(
-                lambda result: _parse_fpt_structured_result(result, schema)
+            )
+
+            def invoke_fpt_structured(
+                input: Any, config: Any | None = None, **invoke_kwargs: Any
+            ) -> BaseModel:
+                result = fpt_structured.invoke(
+                    _add_fpt_structured_output_contract(input, schema),
+                    config=config,
+                    **invoke_kwargs,
+                )
+                return _parse_fpt_structured_result(result, schema)
+
+            async def ainvoke_fpt_structured(
+                input: Any, config: Any | None = None, **invoke_kwargs: Any
+            ) -> BaseModel:
+                result = await fpt_structured.ainvoke(
+                    _add_fpt_structured_output_contract(input, schema),
+                    config=config,
+                    **invoke_kwargs,
+                )
+                return _parse_fpt_structured_result(result, schema)
+
+            fallback = RunnableLambda(
+                invoke_fpt_structured,
+                afunc=ainvoke_fpt_structured,
+                name="fpt_structured_output_adapter",
             )
         else:
             fallback = self.fallback.with_structured_output(schema, **fallback_kwargs)
@@ -859,9 +1169,15 @@ def analyze_turn_node(
                 _conversation_history(state), ensure_ascii=False
             ),
         )
-        analysis = advisor_runtime.structured(TurnAnalysisResult).invoke(
-            advisor_runtime.guarded_prompt(prompt)
-        )
+        try:
+            analysis = advisor_runtime.structured(TurnAnalysisResult).invoke(
+                advisor_runtime.guarded_prompt(prompt)
+            )
+        except ProviderFallbackError:
+            logger.warning(
+                "Using deterministic turn routing after all LLM providers failed"
+            )
+            analysis = _deterministic_turn_analysis(query, current_active)
     advisor_runtime.validate_model_output(analysis, surface="turn_analysis_output")
     requested_category = CATEGORY_SLUGS.get(analysis.category)
     evidence = (analysis.switch_evidence or "").strip()
@@ -1056,19 +1372,25 @@ def extract_need_profile_node(
     context = _get_category_context(state, category)
     current = context.get("profile") or {}
     analysis = (state.get("conversation") or {}).get("analysis") or {}
-    extraction = advisor_runtime.structured(ProfilePatch).invoke(
-        advisor_runtime.guarded_prompt(
-            spec.build_need_extraction_prompt(
-                state["control"]["current_user_input"],
-                current,
-                turn_action=analysis.get("action", TurnAction.DISCOVER.value),
-                pending_questions=(context.get("clarification") or {}).get(
-                    "questions", []
-                ),
-                conversation_history=_conversation_history(state),
+    try:
+        extraction = advisor_runtime.structured(ProfilePatch).invoke(
+            advisor_runtime.guarded_prompt(
+                spec.build_need_extraction_prompt(
+                    state["control"]["current_user_input"],
+                    current,
+                    turn_action=analysis.get("action", TurnAction.DISCOVER.value),
+                    pending_questions=(context.get("clarification") or {}).get(
+                        "questions", []
+                    ),
+                    conversation_history=_conversation_history(state),
+                )
             )
         )
-    )
+    except ProviderFallbackError:
+        logger.warning(
+            "Using an empty profile patch after all LLM providers failed"
+        )
+        extraction = ProfilePatch()
     advisor_runtime.validate_model_output(extraction, surface="profile_patch_output")
     if isinstance(extraction, ProfilePatch):
         patch = extraction
@@ -1226,23 +1548,39 @@ def _interpret_custom_answer(
         custom_answer, surface="clarification_custom_answer"
     )
     catalog_question = spec.config["question_catalog"][question_id]
-    result = advisor_runtime.structured(spec.custom_answer_model).invoke(
-        advisor_runtime.guarded_prompt(
-            spec.build_custom_answer_prompt(
-                {
-                    "question": catalog_question["question"],
-                    "question_id": question_id,
-                    "available_options": [
-                        {"option_id": item["option_id"], "label": item["label"]}
-                        for item in catalog_question["options"]
-                        if item["option_id"] != "other"
-                    ],
-                    "custom_answer": custom_answer,
-                    "current_need_profile": profile,
-                }
+    try:
+        result = advisor_runtime.structured(spec.custom_answer_model).invoke(
+            advisor_runtime.guarded_prompt(
+                spec.build_custom_answer_prompt(
+                    {
+                        "question": catalog_question["question"],
+                        "question_id": question_id,
+                        "available_options": [
+                            {
+                                "option_id": item["option_id"],
+                                "label": item["label"],
+                            }
+                            for item in catalog_question["options"]
+                            if item["option_id"] != "other"
+                        ],
+                        "custom_answer": custom_answer,
+                        "current_need_profile": profile,
+                    }
+                )
             )
         )
-    )
+    except ProviderFallbackError:
+        logger.warning(
+            "Marking a custom clarification answer unresolved after all LLM "
+            "providers failed"
+        )
+        result = spec.custom_answer_model.model_validate(
+            {
+                "interpretation_status": "unresolved",
+                "raw_answer": custom_answer,
+                "confidence": 0.0,
+            }
+        )
     advisor_runtime.validate_model_output(result, surface="custom_answer_output")
     return result
 
@@ -1554,6 +1892,24 @@ def retrieve_candidates_node(
     }
 
 
+def _retrieval_order_ranking(candidates: list[dict[str, Any]]) -> RankingResult:
+    return RankingResult(
+        selected_products=[
+            {
+                "product_id": candidate["product_id"],
+                "reason": (
+                    "Sản phẩm nằm trong nhóm phù hợp nhất với nhu cầu và "
+                    "các bộ lọc đã cung cấp."
+                ),
+                "trade_off": (
+                    "Cần đối chiếu thêm các thông số chi tiết trước khi quyết định."
+                ),
+            }
+            for candidate in candidates[:3]
+        ]
+    )
+
+
 def rank_candidates_node(
     state: AdvisorState, advisor_runtime: AdvisorRuntime
 ) -> NodeUpdate:
@@ -1585,21 +1941,7 @@ def rank_candidates_node(
             logger.warning(
                 "Using deterministic retrieval-order ranking after all LLM providers failed"
             )
-            result = RankingResult(
-                selected_products=[
-                    {
-                        "product_id": candidate["product_id"],
-                        "reason": (
-                            "Sản phẩm nằm trong nhóm phù hợp nhất với nhu cầu và "
-                            "các bộ lọc đã cung cấp."
-                        ),
-                        "trade_off": (
-                            "Cần đối chiếu thêm các thông số chi tiết trước khi quyết định."
-                        ),
-                    }
-                    for candidate in candidates[:3]
-                ]
-            )
+            result = _retrieval_order_ranking(candidates)
         advisor_runtime.validate_model_output(result, surface="ranking_output")
         selected_ids = {item.product_id for item in result.selected_products}
         if selected_ids and selected_ids <= allowed_ids:
@@ -1612,7 +1954,10 @@ def rank_candidates_node(
     assert result is not None
     selected_ids = {item.product_id for item in result.selected_products}
     if not selected_ids or not selected_ids <= allowed_ids:
-        raise ValueError("Gemini selected product IDs outside the retrieved candidates")
+        logger.warning(
+            "Using deterministic retrieval-order ranking after invalid product IDs"
+        )
+        result = _retrieval_order_ranking(candidates)
     return {
         "ranking": {
             "selected_products": [
@@ -1704,6 +2049,23 @@ def _finalize_response(state: AdvisorState, answer: str) -> NodeUpdate:
     }
 
 
+def _deterministic_advisory_response(
+    grounded_selection: list[dict[str, Any]],
+) -> str:
+    lines = ["Mình đã lọc được các lựa chọn sau từ dữ liệu sản phẩm hiện có:"]
+    for index, item in enumerate(grounded_selection, start=1):
+        product = item["product_data"]
+        name = product.get("name") or item["product_id"]
+        lines.append(
+            f"{index}. {name}: {item.get('reason', '')} "
+            f"Đánh đổi: {item.get('trade_off', '')}"
+        )
+    lines.append(
+        "Bạn có thể cho mình biết ưu tiên quan trọng nhất để mình thu hẹp thêm."
+    )
+    return "\n".join(lines)
+
+
 def compose_response_node(
     state: AdvisorState, advisor_runtime: AdvisorRuntime
 ) -> NodeUpdate:
@@ -1740,20 +2102,10 @@ def compose_response_node(
         logger.warning(
             "Using deterministic advisory response after all LLM providers failed"
         )
-        lines = ["Mình đã lọc được các lựa chọn sau từ dữ liệu sản phẩm hiện có:"]
-        for index, item in enumerate(grounded_selection, start=1):
-            product = item["product_data"]
-            name = product.get("name") or item["product_id"]
-            lines.append(
-                f"{index}. {name}: {item.get('reason', '')} "
-                f"Đánh đổi: {item.get('trade_off', '')}"
-            )
-        lines.append(
-            "Bạn có thể cho mình biết ưu tiên quan trọng nhất để mình thu hẹp thêm."
-        )
-        answer = "\n".join(lines)
+        answer = _deterministic_advisory_response(grounded_selection)
     if not answer:
-        raise ValueError("Gemini returned an empty advisory response")
+        logger.warning("Using deterministic advisory response after empty LLM output")
+        answer = _deterministic_advisory_response(grounded_selection)
     decision = advisor_runtime.get_guardrail().inspect(
         answer, surface="advisory_output"
     )

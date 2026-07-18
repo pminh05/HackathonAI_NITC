@@ -84,10 +84,12 @@ cũng hỗ trợ chạy FPT-only khi để trống `GOOGLE_API_KEY`; cách này 
 gọi Gemini thất bại ở mỗi lần khởi động nếu Google key không còn hợp lệ.
 `FPT_ENABLE_THINKING=false` truyền hard switch của Qwen vào chat template để
 model trả lời trực tiếp mà không sinh thinking block.
-FPT dùng function calling cho các schema quyết định hữu hạn, nhưng riêng
-`ProfilePatch` dùng native JSON schema để tránh request bị treo với các trường
-dictionary. Mỗi request có timeout 30 giây và không retry mặc định vì đây đã là
-nhánh fallback sau Gemini.
+Mọi structured output từ FPT đều dùng JSON schema với `include_raw=True`. Adapter
+thêm output contract tường minh, phục hồi JSON thường/fenced JSON/tool call/YAML
+hoặc Markdown phổ biến, rồi luôn xác thực lại bằng Pydantic. Cách này tránh treo
+do function calling chứa trường dictionary và không để dữ liệu sai schema đi
+tiếp trong graph. Mỗi request có timeout 30 giây và không retry mặc định vì đây
+đã là nhánh fallback sau Gemini.
 
 Các model đều là LangChain Runnable và có metadata theo provider/model. Khi
 cần theo dõi bằng LangSmith, chỉ cần bổ sung các biến môi trường chuẩn; không
