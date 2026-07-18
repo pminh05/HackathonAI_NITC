@@ -51,8 +51,10 @@ STANDARDIZED_METADATA_KEYS = {
     "Dung tích ngăn chuyển đổi lít",
 }
 
-# Canonical fields that already use their final name before normalization.
-PASSTHROUGH_METADATA_KEYS = {"brand"}
+# Canonical ASCII paths do not need the quoted-leaf syntax used for Vietnamese
+# keys. Qdrant reports this index as ``metadata.brand`` even when it was created
+# from ``metadata."brand"``.
+PASSTHROUGH_METADATA_PATHS = {"metadata.brand"}
 
 
 def _metadata_path(key: str) -> str:
@@ -62,9 +64,8 @@ def _metadata_path(key: str) -> str:
 
 def _validate_payload_fields(fields: dict[str, str]) -> None:
     supported_paths = {
-        _metadata_path(key)
-        for key in STANDARDIZED_METADATA_KEYS | PASSTHROUGH_METADATA_KEYS
-    }
+        _metadata_path(key) for key in STANDARDIZED_METADATA_KEYS
+    } | PASSTHROUGH_METADATA_PATHS
     invalid = {path for path in fields.values() if path not in supported_paths}
     if invalid:
         joined = ", ".join(sorted(invalid))
