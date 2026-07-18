@@ -7,7 +7,7 @@ from sentence_transformers import SentenceTransformer
 
 DATASET = "may_giat"
 BASE_DIR = Path(__file__).resolve().parent
-INPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed.json"
+INPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed_vi.json"
 OUTPUT_FILE = BASE_DIR / "data" / f"{DATASET}_embedded.json"
 MODEL_NAME = "intfloat/multilingual-e5-small"
 BATCH_SIZE = 128

@@ -15,4 +15,7 @@ __pycache__/
 .DS_Store
 frontend/node_modules/
 frontend/dist/
+ingestion/*/data/*_processed.json
+ingestion/*/data/*_processed_vi.json
+ingestion/*/data/*_embedded.json
 

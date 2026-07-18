@@ -1,4 +1,4 @@
-"""LangGraph builder for the refrigerator advisory MVP."""
+"""LangGraph builder for the multi-category product advisor."""
 
 from __future__ import annotations
 

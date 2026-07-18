@@ -492,15 +492,15 @@ def test_other_answer_is_interpreted_without_second_interrupt() -> None:
     ] == "Nhà có 7 người"
 
 
-def test_non_refrigerator_intent_returns_placeholder_without_qdrant() -> None:
-    llm = FakeLLM(intent=IntentLabel.WASHING_MACHINE)
+def test_unimplemented_intent_returns_placeholder_without_qdrant() -> None:
+    llm = FakeLLM(intent=IntentLabel.DRYER)
     qdrant = FakeQdrant()
     graph = build_graph(llm=llm, qdrant_client=qdrant)
     result = graph.invoke(
-        {"messages": [HumanMessage(content="Tư vấn máy giặt")]},
+        {"messages": [HumanMessage(content="Tư vấn máy sấy quần áo")]},
         {"configurable": {"thread_id": "placeholder"}},
     )
-    assert "pipeline tư vấn tủ lạnh" in result["response"]["answer"]
+    assert "hỗ trợ tư vấn tủ lạnh, máy lạnh và máy giặt" in result["response"]["answer"]
     assert qdrant.query_kwargs is None
 
 
@@ -614,9 +614,9 @@ def test_switching_category_and_returning_restores_refrigerator_context() -> Non
                 has_profile_update=True,
             ),
             TurnAnalysisResult(
-                category=IntentLabel.WASHING_MACHINE,
+                category=IntentLabel.DRYER,
                 category_transition="switch",
-                switch_evidence="máy giặt",
+                switch_evidence="máy sấy quần áo",
                 action="switch_category",
             ),
             TurnAnalysisResult(
@@ -636,9 +636,9 @@ def test_switching_category_and_returning_restores_refrigerator_context() -> Non
     )
     first_profile = first["need_profile"]
     switched = graph.invoke(
-        {"messages": [HumanMessage(content="Chuyển qua máy giặt")]}, config
+        {"messages": [HumanMessage(content="Chuyển qua máy sấy quần áo")]}, config
     )
-    assert switched["conversation"]["active_category"] == "washing_machine"
+    assert switched["conversation"]["active_category"] == "dryer"
 
     restored = graph.invoke(
         {"messages": [HumanMessage(content="Quay lại tủ lạnh")]}, config

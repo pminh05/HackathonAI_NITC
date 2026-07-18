@@ -94,7 +94,7 @@ class CategoryRegistry:
 
 
 def build_default_registry() -> CategoryRegistry:
-    """Register the only implemented MVP category."""
+    """Register all implemented product categories."""
     registry = CategoryRegistry()
     registry.register(
         CategoryDefinition(
@@ -102,6 +102,22 @@ def build_default_registry() -> CategoryRegistry:
             display_name="Tủ Lạnh",
             package_path="advisor.categories.refrigerator",
             config_path=Path(__file__).with_name("refrigerator") / "config.yaml",
+        )
+    )
+    registry.register(
+        CategoryDefinition(
+            name="air_conditioner",
+            display_name="Máy lạnh",
+            package_path="advisor.categories.air_conditioner",
+            config_path=Path(__file__).with_name("air_conditioner") / "config.yaml",
+        )
+    )
+    registry.register(
+        CategoryDefinition(
+            name="washing_machine",
+            display_name="Máy giặt",
+            package_path="advisor.categories.washing_machine",
+            config_path=Path(__file__).with_name("washing_machine") / "config.yaml",
         )
     )
     return registry

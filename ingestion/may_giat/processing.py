@@ -11,6 +11,17 @@ except ImportError:
 CATEGORY = "máy giặt"
 DATASET = "may_giat"
 GROUPS = [["Nhu cầu sử dụng",["Loại sản phẩm","Lồng giặt","khoi_luong_giat_kg","Số người sử dụng","so_nguoi_min","so_nguoi_max"]],["Khả năng giặt",["Chương trình","so_chuong_trinh","Công nghệ","toc_do_vat_rpm","Công nghệ sấy"]],["Vận hành và tiết kiệm",["Loại Inverter","Động cơ","dien_nang_kwh","Tiện ích","Bảng điều khiển"]],["Lắp đặt",["ngang_mm","sau_mm","cao_mm","Chất liệu ruột","Chất liệu thân vỏ"]]]
+FIELD_LABELS = {
+    "khoi_luong_giat_kg": "khối lượng giặt (kg)",
+    "so_nguoi_min": "số người tối thiểu",
+    "so_nguoi_max": "số người tối đa",
+    "so_chuong_trinh": "số chương trình",
+    "toc_do_vat_rpm": "tốc độ vắt (vòng/phút)",
+    "dien_nang_kwh": "điện năng (kWh/kg)",
+    "ngang_mm": "ngang (dữ liệu nguồn)",
+    "sau_mm": "sâu (dữ liệu nguồn)",
+    "cao_mm": "cao (dữ liệu nguồn)",
+}
 MAX_TOKENS = 480
 BASE_DIR = Path(__file__).resolve().parent
 IMAGE_PATH = "/public/may_giat.jpg"
@@ -92,7 +103,7 @@ def create_semantic_text(product, sku):
             signature = (field, str(value))
             if meaningful(value) and signature not in used:
                 used.add(signature)
-                label = field.replace("_", " ")
+                label = FIELD_LABELS.get(field, field.replace("_", " "))
                 facts.append(f"{label}: {display_value(value)}")
         if facts:
             sentences.append(f"{heading}: " + "; ".join(facts[:8]) + ".")

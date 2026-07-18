@@ -85,6 +85,21 @@ Thứ tự và output:
 | `embedding.py` | `<dataset>_processed_vi.json` | `<dataset>_embedded.json` |
 | `qdrant.py` | `<dataset>_embedded.json` | Collection trên Qdrant |
 
+Máy giặt dùng Qdrant Cloud Inference trực tiếp, nên không cần cài `torch` hoặc
+chạy embedding local:
+
+```powershell
+python may_giat/processing.py
+python may_giat/changeName.py
+python may_giat/dictionary.py
+python may_giat/qdrant.py
+```
+
+Với máy giặt, `qdrant.py` nhận `may_giat_processed_vi.json`, gửi semantic text
+cho model `intfloat/multilingual-e5-small` trên Qdrant Cloud và upsert point theo
+UUID ổn định. Metadata chuẩn hóa gồm loại máy/lồng, giá, tải giặt, số người,
+inverter, khả năng sấy và kích thước cm.
+
 `processing.py` tạo `text` semantic tối đa 480 token và thêm `image_path` ở cấp đối tượng. Ví dụ:
 
 ```json
