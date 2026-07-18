@@ -1208,7 +1208,7 @@ export default function App() {
             }
             onKeyDown={onComposerKeyDown}
             placeholder={composerPlaceholder}
-            rows={2}
+            rows={1}
             disabled={!canSend}
             aria-label="Tin nhắn"
           />
