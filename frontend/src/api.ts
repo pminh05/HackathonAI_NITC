@@ -22,6 +22,7 @@ export interface SelectedProduct {
   trade_off: string;
   name?: string | null;
   image_url?: string | null;
+  image_path?: string | null;
   effective_price_vnd?: number | null;
   original_price_vnd?: number | null;
   promotional_price_vnd?: number | null;
@@ -66,6 +67,17 @@ const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000"
   /\/$/,
   "",
 );
+
+export function resolveProductImageUrl(imagePath: string | null | undefined): string | null {
+  const path = imagePath?.trim();
+  if (!path) return null;
+  if (/^(?:https?:|data:|blob:)/i.test(path)) return path;
+
+  const filename = path.split(/[\\/]/).filter(Boolean).pop();
+  return filename
+    ? `${apiBaseUrl}/product-images/${encodeURIComponent(filename)}`
+    : null;
+}
 
 function extractErrorMessage(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== "object") return fallback;

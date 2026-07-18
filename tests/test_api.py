@@ -96,6 +96,7 @@ class FakeQdrant:
                         "product_id": "sku-api",
                         "name": "Tủ lạnh API",
                         "text": "Tủ lạnh 350 lít có Inverter.",
+                        "image_path": "/catalog/public/tu_lanh.jpg",
                         "metadata": {
                             "brand": "Test",
                             "Giá gốc vnd": 18_000_000,
@@ -142,6 +143,10 @@ def test_chat_interrupt_status_resume_and_duplicate_resume(tmp_path: Any) -> Non
         api_settings(tmp_path), llm=FakeLLM(), qdrant_client=FakeQdrant()
     )
     with TestClient(application) as client:
+        image_response = client.get("/product-images/tu_lanh.jpg")
+        assert image_response.status_code == 200
+        assert image_response.headers["content-type"] == "image/jpeg"
+
         response = client.post("/chat", json={"message": "Tư vấn tủ lạnh"})
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
@@ -190,6 +195,10 @@ def test_chat_interrupt_status_resume_and_duplicate_resume(tmp_path: Any) -> Non
             data["delta"] for event, data in resumed_events if event == "token"
         ) == "Đây là câu trả lời tư vấn từ API."
         assert resumed_events[-1][1]["selected_products"][0]["product_id"] == "sku-api"
+        assert (
+            resumed_events[-1][1]["selected_products"][0]["image_path"]
+            == "/catalog/public/tu_lanh.jpg"
+        )
 
         duplicate = client.post(
             f"/chat/{thread_id}/resume",

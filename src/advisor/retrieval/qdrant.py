@@ -92,6 +92,7 @@ def normalize_candidate(point: Any) -> dict[str, Any]:
         capacity_lit=metadata.get("Dung tích sử dụng lít"),
         suitable_for=metadata.get("Số người sử dụng"),
         description=payload.get("text"),
+        image_path=payload.get("image_path") or metadata.get("image_path"),
     ).model_dump(mode="json")
     candidate.update(
         {

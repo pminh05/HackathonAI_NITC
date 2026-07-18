@@ -1,4 +1,6 @@
-import { FormEvent, Fragment, KeyboardEvent, ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   ApiError,
   ClarificationAnswer,
@@ -6,6 +8,7 @@ import {
   SelectedProduct,
   SseEvent,
   getThreadStatus,
+  resolveProductImageUrl,
   resumeChat,
   streamChat,
 } from "./api";
@@ -228,7 +231,13 @@ function reducer(state: ChatState, action: Action): ChatState {
         ...state,
         items: state.items.map((item) =>
           item.id === action.itemId && item.type === "clarification"
-            ? { ...item, submitted: true }
+            ? {
+                ...item,
+                confirmedIds: item.questions
+                  .filter((question) => validStoredAnswer(question, item.answers[question.question_id]))
+                  .map((question) => question.question_id),
+                submitted: true,
+              }
             : item,
         ),
       };
@@ -344,82 +353,12 @@ function finitePrice(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function renderInlineMarkdown(text: string): ReactNode[] {
-  return text.split(/(\*\*.+?\*\*)/g).filter(Boolean).map((part, index) =>
-    part.startsWith("**") && part.endsWith("**")
-      ? <strong key={index}>{part.slice(2, -2)}</strong>
-      : <Fragment key={index}>{part}</Fragment>,
-  );
-}
-
 function MarkdownText({ text }: { text: string }) {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
-  const blocks: ReactNode[] = [];
-  let index = 0;
-
-  while (index < lines.length) {
-    if (!lines[index].trim()) {
-      index += 1;
-      continue;
-    }
-
-    const bullet = lines[index].match(/^\s*[-*]\s+(.+)$/);
-    if (bullet) {
-      const items: string[] = [];
-      while (index < lines.length) {
-        const match = lines[index].match(/^\s*[-*]\s+(.+)$/);
-        if (!match) break;
-        items.push(match[1]);
-        index += 1;
-      }
-      blocks.push(
-        <ul key={`ul-${index}`}>
-          {items.map((item, itemIndex) => <li key={itemIndex}>{renderInlineMarkdown(item)}</li>)}
-        </ul>,
-      );
-      continue;
-    }
-
-    const ordered = lines[index].match(/^\s*\d+[.)]\s+(.+)$/);
-    if (ordered) {
-      const items: string[] = [];
-      while (index < lines.length) {
-        const match = lines[index].match(/^\s*\d+[.)]\s+(.+)$/);
-        if (!match) break;
-        items.push(match[1]);
-        index += 1;
-      }
-      blocks.push(
-        <ol key={`ol-${index}`}>
-          {items.map((item, itemIndex) => <li key={itemIndex}>{renderInlineMarkdown(item)}</li>)}
-        </ol>,
-      );
-      continue;
-    }
-
-    const paragraph: string[] = [];
-    while (
-      index < lines.length &&
-      lines[index].trim() &&
-      !/^\s*[-*]\s+/.test(lines[index]) &&
-      !/^\s*\d+[.)]\s+/.test(lines[index])
-    ) {
-      paragraph.push(lines[index].trim());
-      index += 1;
-    }
-    blocks.push(
-      <p key={`p-${index}`}>
-        {paragraph.map((line, lineIndex) => (
-          <Fragment key={lineIndex}>
-            {lineIndex > 0 ? <br /> : null}
-            {renderInlineMarkdown(line)}
-          </Fragment>
-        ))}
-      </p>,
-    );
-  }
-
-  return <div className="markdown-content">{blocks}</div>;
+  return (
+    <div className="markdown-content">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
+  );
 }
 
 function ProductCard({ product }: { product: SelectedProduct }) {
@@ -429,13 +368,14 @@ function ProductCard({ product }: { product: SelectedProduct }) {
   const original = finitePrice(product.original_price_vnd) ? product.original_price_vnd : null;
   const effective = finitePrice(product.effective_price_vnd) ? product.effective_price_vnd : null;
   const currentPrice = promotional ?? effective ?? original;
+  const imageUrl = product.image_url || resolveProductImageUrl(product.image_path);
 
   return (
     <article className="product-card">
-      {product.image_url ? (
+      {imageUrl ? (
         <img
           className="product-image"
-          src={product.image_url}
+          src={imageUrl}
           alt={product.name || product.product_id}
           onError={(event) => {
             event.currentTarget.hidden = true;
