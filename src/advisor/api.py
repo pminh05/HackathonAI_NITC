@@ -16,11 +16,14 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 from pydantic import BaseModel, Field, model_validator
 
-from advisor.categories.refrigerator import load_config
-from advisor.categories.refrigerator.setup_indexes import find_missing_indexes
+from advisor.categories.registry import CategoryRegistry, build_default_registry
 from advisor.graph import build_graph
 from advisor.persistence.checkpointer import open_async_sqlite_checkpointer
-from advisor.retrieval.qdrant import AdvisorConfigurationError, create_qdrant_client
+from advisor.retrieval.qdrant import (
+    AdvisorConfigurationError,
+    create_qdrant_client,
+    find_missing_indexes,
+)
 from advisor.schemas import ApplicationSettings, ClarificationAnswer
 
 
@@ -405,6 +408,7 @@ def create_app(
     graph: Any | None = None,
     llm: Any | None = None,
     qdrant_client: Any | None = None,
+    category_registry: CategoryRegistry | None = None,
     validate_services: bool = True,
 ) -> FastAPI:
     """Create the API app with injectable graph dependencies for tests."""
@@ -426,28 +430,37 @@ def create_app(
             raise AdvisorConfigurationError("GOOGLE_API_KEY is required")
         client = qdrant_client or create_qdrant_client(app_settings)
         owns_client = qdrant_client is None
+        resolved_registry = category_registry or build_default_registry()
+        resolved_registry.validate_all()
         try:
             if validate_services:
-                category_config = load_config()
-                missing = await asyncio.to_thread(
-                    find_missing_indexes,
-                    client,
-                    category_config["collection"],
-                    category_config["payload_indexes"],
-                )
-                if missing:
-                    raise AdvisorConfigurationError(
-                        "Qdrant payload indexes are missing: "
-                        + ", ".join(sorted(missing))
-                        + ". Run `PYTHONPATH=src .venv/bin/python -m "
-                        "advisor.categories.refrigerator.setup_indexes --apply`."
+                for category, definition in resolved_registry.all().items():
+                    if not definition.implemented:
+                        continue
+                    spec = resolved_registry.get_spec(category)
+                    missing = await asyncio.to_thread(
+                        find_missing_indexes,
+                        client,
+                        spec.config["collection"],
+                        spec.config["payload_indexes"],
                     )
+                    if missing:
+                        hint = (
+                            f" Run `{spec.setup_indexes_command}`."
+                            if spec.setup_indexes_command
+                            else ""
+                        )
+                        raise AdvisorConfigurationError(
+                            f"Qdrant category {category!r} is missing payload "
+                            f"indexes: {', '.join(sorted(missing))}.{hint}"
+                        )
             async with open_async_sqlite_checkpointer(app_settings) as checkpointer:
                 application.state.graph = build_graph(
                     settings=app_settings,
                     checkpointer=checkpointer,
                     llm=llm,
                     qdrant_client=client,
+                    category_registry=resolved_registry,
                 )
                 application.state.ready = True
                 yield

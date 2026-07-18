@@ -51,6 +51,11 @@ STANDARDIZED_METADATA_KEYS = {
     "Dung tích ngăn chuyển đổi lít",
 }
 
+# Canonical ASCII paths do not need the quoted-leaf syntax used for Vietnamese
+# keys. Qdrant reports this index as ``metadata.brand`` even when it was created
+# from ``metadata."brand"``.
+PASSTHROUGH_METADATA_PATHS = {"metadata.brand"}
+
 
 def _metadata_path(key: str) -> str:
     """Return a Qdrant JSON path with the Vietnamese leaf safely quoted."""
@@ -58,7 +63,9 @@ def _metadata_path(key: str) -> str:
 
 
 def _validate_payload_fields(fields: dict[str, str]) -> None:
-    supported_paths = {_metadata_path(key) for key in STANDARDIZED_METADATA_KEYS}
+    supported_paths = {
+        _metadata_path(key) for key in STANDARDIZED_METADATA_KEYS
+    } | PASSTHROUGH_METADATA_PATHS
     invalid = {path for path in fields.values() if path not in supported_paths}
     if invalid:
         joined = ", ".join(sorted(invalid))
@@ -110,6 +117,13 @@ def build_filter(
         )
 
     hard = need_profile.get("hard_constraints") or {}
+    brands = [str(value) for value in hard.get("brands", []) if value]
+    if brands:
+        must.append(
+            models.FieldCondition(
+                key=fields["brand"], match=models.MatchAny(any=brands)
+            )
+        )
     styles = [str(value) for value in hard.get("styles", []) if value]
     if styles:
         must.append(

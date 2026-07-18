@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
 
 from pydantic import BaseModel
+
+from advisor.categories.base import CategorySpec
 
 
 class CategoryDefinition(BaseModel):
@@ -15,6 +18,7 @@ class CategoryDefinition(BaseModel):
     package_path: str
     config_path: Path
     implemented: bool = True
+    factory_name: str = "get_category_spec"
 
 
 class CategoryRegistry:
@@ -22,10 +26,22 @@ class CategoryRegistry:
 
     def __init__(self) -> None:
         self._categories: dict[str, CategoryDefinition] = {}
+        self._specs: dict[str, CategorySpec] = {}
 
     def register(self, definition: CategoryDefinition) -> None:
         """Register or replace one category definition."""
         self._categories[definition.name] = definition
+        self._specs.pop(definition.name, None)
+
+    def register_spec(
+        self, definition: CategoryDefinition, spec: CategorySpec
+    ) -> None:
+        """Register an eagerly constructed spec, primarily for tests/embedding."""
+        spec.validate()
+        if definition.name != spec.name:
+            raise ValueError("Category definition and spec names must match")
+        self._categories[definition.name] = definition
+        self._specs[definition.name] = spec
 
     def get(self, name: str) -> CategoryDefinition:
         """Return a category definition by name."""
@@ -34,6 +50,47 @@ class CategoryRegistry:
     def all(self) -> dict[str, CategoryDefinition]:
         """Return a shallow copy of registered category definitions."""
         return self._categories.copy()
+
+    def get_spec(self, name: str) -> CategorySpec:
+        """Lazily load and validate a category's behavior contract."""
+        if name in self._specs:
+            return self._specs[name]
+        definition = self.get(name)
+        if not definition.implemented:
+            raise KeyError(f"Category {name!r} is not implemented")
+        module = import_module(definition.package_path)
+        factory = getattr(module, definition.factory_name, None)
+        if not callable(factory):
+            raise ValueError(
+                f"{definition.package_path} must export {definition.factory_name}()"
+            )
+        spec = factory()
+        if not isinstance(spec, CategorySpec):
+            raise TypeError(
+                f"{definition.package_path}.{definition.factory_name}() must return "
+                "CategorySpec"
+            )
+        spec.validate()
+        if spec.name != definition.name:
+            raise ValueError("Category definition and spec names must match")
+        self._specs[name] = spec
+        return spec
+
+    def validate_all(self) -> None:
+        """Validate enabled specs and reject collection ownership conflicts."""
+        collections: dict[str, str] = {}
+        for name, definition in self._categories.items():
+            if not definition.implemented:
+                continue
+            spec = self.get_spec(name)
+            collection = str(spec.config["collection"])
+            owner = collections.get(collection)
+            if owner is not None:
+                raise ValueError(
+                    f"Qdrant collection {collection!r} is shared by categories "
+                    f"{owner!r} and {name!r}"
+                )
+            collections[collection] = name
 
 
 def build_default_registry() -> CategoryRegistry:
