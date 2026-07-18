@@ -85,8 +85,9 @@ Thứ tự và output:
 | `embedding.py` | `<dataset>_processed_vi.json` | `<dataset>_embedded.json` |
 | `qdrant.py` | `<dataset>_embedded.json` | Collection trên Qdrant |
 
-Máy giặt, máy rửa chén, máy nước nóng, máy tính bảng và máy in dùng Qdrant
-Cloud Inference trực tiếp, nên không cần cài `torch` hoặc chạy embedding local:
+Máy giặt, máy sấy quần áo, máy rửa chén, máy nước nóng, máy tính bảng và máy in
+dùng Qdrant Cloud Inference trực tiếp, nên không cần cài `torch` hoặc chạy
+embedding local:
 
 ```powershell
 python may_giat/processing.py
@@ -180,20 +181,21 @@ lực, dung tích, nhiệt độ, Inverter, gas, kích thước và các `featur
 lọc. Hai family dùng chung collection nhưng luôn được lọc bằng metadata khi nhu
 cầu người dùng đã xác định loại tủ.
 
-Máy sấy quần áo dùng pipeline local embedding đầy đủ:
+Máy sấy quần áo dùng metadata canonical và Qdrant Cloud Inference:
 
 ```powershell
 python may_say_quan_ao/processing.py
 python may_say_quan_ao/changeName.py
 python may_say_quan_ao/dictionary.py
-python may_say_quan_ao/embedding.py
 python may_say_quan_ao/qdrant.py
 ```
 
-Collection `maysayquanao` dùng vector cosine 384 chiều. Metadata canonical gồm
-`dryer_type`, giá VND, tải sấy kg, khoảng số người, kích thước cm, công suất W,
-inverter và cảm biến. Các trường công nghệ/tiện ích tiếng Việt vẫn được giữ cho
-semantic retrieval và ranking.
+`qdrant.py` đọc trực tiếp `may_say_quan_ao_processed_vi.json` và từ chối upload
+nếu metadata canonical còn thiếu, tránh dùng nhầm file embedding cũ. Collection
+`maysayquanao` dùng vector cosine 384 chiều. Metadata canonical gồm `dryer_type`,
+giá VND, tải sấy kg, khoảng số người, kích thước cm, công suất W, inverter và cảm
+biến. Các trường công nghệ/tiện ích tiếng Việt vẫn được giữ cho semantic
+retrieval và ranking.
 
 `processing.py` tạo `text` semantic tối đa 480 token và thêm `image_path` ở cấp đối tượng. Ví dụ:
 

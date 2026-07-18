@@ -262,19 +262,24 @@ def test_semantic_text_uses_real_dryer_technology_field() -> None:
     assert "khối lượng sấy (kg): 9" in text
 
 
-def test_ingestion_point_shape_is_stable_and_uses_384_dimensions() -> None:
+def test_ingestion_point_shape_uses_canonical_cloud_inference_payload() -> None:
     product = {
         "id": "sku-dryer",
         "name": "Máy sấy Test sku-dryer",
         "text": "Máy sấy bơm nhiệt 9 kg.",
         "image_path": "/public/may_say_quan_ao.jpg",
-        "metadata": {"category_scope": "dryer"},
-        "vector": [0.0] * 384,
+        "metadata": {
+            "category_scope": "dryer",
+            "dryer_type": "heat_pump",
+            "dry_capacity_kg": 9.0,
+        },
     }
     first = next(QDRANT_MODULE["point_generator"]([product]))
     second = next(QDRANT_MODULE["point_generator"]([product]))
     assert first.id == second.id
-    assert len(first.vector) == 384
+    assert isinstance(first.vector, models.Document)
+    assert first.vector.model == "intfloat/multilingual-e5-small"
+    assert first.vector.text == "passage: Máy sấy bơm nhiệt 9 kg."
     assert set(first.payload) == {
         "product_id",
         "name",
@@ -282,6 +287,18 @@ def test_ingestion_point_shape_is_stable_and_uses_384_dimensions() -> None:
         "image_path",
         "metadata",
     }
+
+    with pytest.raises(ValueError, match="metadata canonical"):
+        next(
+            QDRANT_MODULE["point_generator"](
+                [
+                    {
+                        **product,
+                        "metadata": {"category": "máy sấy quần áo"},
+                    }
+                ]
+            )
+        )
 
 
 def test_category_spec_and_config_match_qdrant_contract() -> None:
