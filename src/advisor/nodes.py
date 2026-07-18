@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.runnables import RunnableLambda
 from langgraph.types import interrupt
 from pydantic import BaseModel
 
@@ -35,6 +36,7 @@ from advisor.state import AdvisorState, NodeUpdate
 
 if TYPE_CHECKING:
     from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_openai import ChatOpenAI
 
 
 CATEGORY_SLUGS = {
@@ -103,6 +105,108 @@ def create_gemini_chat_model(settings: ApplicationSettings) -> ChatGoogleGenerat
         include_thoughts=False,
         temperature=0,
         max_retries=2,
+        tags=["provider:google", "role:primary"],
+        metadata={"provider": "google", "model": settings.gemini_model},
+    )
+
+
+def create_fpt_chat_model(settings: ApplicationSettings) -> ChatOpenAI:
+    """Create FPT AI Factory's OpenAI-compatible fallback chat model."""
+    try:
+        from langchain_openai import ChatOpenAI
+    except ImportError as exc:
+        raise RuntimeError(
+            "Install project dependencies before creating the FPT fallback."
+        ) from exc
+
+    if not settings.fpt_api_key:
+        raise AdvisorConfigurationError("FPT_API_KEY is required")
+    return ChatOpenAI(
+        model=settings.fpt_model,
+        api_key=settings.fpt_api_key.get_secret_value(),
+        base_url=settings.fpt_base_url,
+        temperature=0,
+        timeout=settings.fpt_timeout_seconds,
+        max_retries=settings.fpt_max_retries,
+        disable_streaming=True,
+        extra_body={
+            "chat_template_kwargs": {
+                "enable_thinking": settings.fpt_enable_thinking,
+            }
+        },
+        tags=["provider:fpt-ai-factory", "role:fallback"],
+        metadata={
+            "provider": "fpt-ai-factory",
+            "model": settings.fpt_model,
+            "thinking_enabled": settings.fpt_enable_thinking,
+        },
+    )
+
+
+@dataclass(frozen=True)
+class FallbackChatModel:
+    """Preserve chat-model structured output while composing a fallback.
+
+    LangChain's ``with_fallbacks`` returns a generic Runnable, so applying it
+    directly to Gemini would hide ``with_structured_output``. This facade first
+    configures both providers and then composes the fallback. FPT's Marketplace
+    endpoint uses function calling for finite decision schemas. ``ProfilePatch``
+    is routed through native JSON schema instead because Qwen can stall when a
+    function tool contains generic dictionary fields.
+    """
+
+    primary: Any
+    fallback: Any
+    fallback_structured_method: str = "function_calling"
+
+    def invoke(self, input: Any, config: Any | None = None, **kwargs: Any) -> Any:
+        runnable = self.primary.with_fallbacks([self.fallback])
+        return runnable.invoke(input, config=config, **kwargs)
+
+    async def ainvoke(
+        self, input: Any, config: Any | None = None, **kwargs: Any
+    ) -> Any:
+        runnable = self.primary.with_fallbacks([self.fallback])
+        return await runnable.ainvoke(input, config=config, **kwargs)
+
+    def with_structured_output(
+        self, schema: type[Any], **kwargs: Any
+    ) -> Any:
+        primary = self.primary.with_structured_output(schema, **kwargs)
+        fallback_method = (
+            "json_schema" if schema is ProfilePatch else self.fallback_structured_method
+        )
+        fallback_kwargs = {
+            **kwargs,
+            "method": fallback_method,
+        }
+        if (
+            fallback_method == "json_schema"
+            and isinstance(schema, type)
+            and issubclass(schema, BaseModel)
+        ):
+            # Passing a Pydantic class makes the OpenAI SDK parse Qwen's raw
+            # response itself. That parser rejects occasional ```json fences.
+            # A JSON-schema dict selects LangChain's fence-tolerant parser; the
+            # final Runnable restores strict Pydantic validation afterwards.
+            fallback = self.fallback.with_structured_output(
+                schema.model_json_schema(), **fallback_kwargs
+            ) | RunnableLambda(schema.model_validate)
+        else:
+            fallback = self.fallback.with_structured_output(
+                schema, **fallback_kwargs
+            )
+        return primary.with_fallbacks([fallback])
+
+
+def create_advisor_chat_model(settings: ApplicationSettings) -> Any:
+    """Create Gemini, optionally falling back to FPT when its key is set."""
+    primary = create_gemini_chat_model(settings)
+    if not settings.fpt_api_key:
+        return primary
+    return FallbackChatModel(
+        primary=primary,
+        fallback=create_fpt_chat_model(settings),
     )
 
 
@@ -118,7 +222,7 @@ class AdvisorRuntime:
 
     def get_llm(self) -> Any:
         if self.llm is None:
-            self.llm = create_gemini_chat_model(self.settings)
+            self.llm = create_advisor_chat_model(self.settings)
         return self.llm
 
     def get_qdrant(self) -> Any:

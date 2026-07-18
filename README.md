@@ -65,6 +65,38 @@ QDRANT_URL=https://your-cluster.qdrant.io
 QDRANT_API_KEY=your-qdrant-api-key
 ```
 
+Để tự động chuyển sang Qwen3.6-27B trên FPT AI Factory khi Gemini lỗi, cấu
+hình thêm API key của FPT. `FPT_BASE_URL` là root URL của Marketplace, không
+thêm hậu tố `/v1`:
+
+```dotenv
+FPT_API_KEY=your-fpt-api-key
+FPT_MODEL=Qwen3.6-27B
+FPT_BASE_URL=https://mkp-api.fptcloud.com
+FPT_ENABLE_THINKING=false
+FPT_TIMEOUT_SECONDS=30
+FPT_MAX_RETRIES=0
+```
+
+Fallback được áp dụng cho cả phản hồi văn bản và structured output. Nếu chưa
+cấu hình `FPT_API_KEY`, ứng dụng tiếp tục chỉ dùng Gemini như trước.
+`FPT_ENABLE_THINKING=false` truyền hard switch của Qwen vào chat template để
+model trả lời trực tiếp mà không sinh thinking block.
+FPT dùng function calling cho các schema quyết định hữu hạn, nhưng riêng
+`ProfilePatch` dùng native JSON schema để tránh request bị treo với các trường
+dictionary. Mỗi request có timeout 30 giây và không retry mặc định vì đây đã là
+nhánh fallback sau Gemini.
+
+Các model đều là LangChain Runnable và có metadata theo provider/model. Khi
+cần theo dõi bằng LangSmith, chỉ cần bổ sung các biến môi trường chuẩn; không
+cần đổi code gọi model:
+
+```dotenv
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=your-langsmith-api-key
+LANGSMITH_PROJECT=product-advisor
+```
+
 Các giá trị local còn lại có thể giữ mặc định:
 
 ```dotenv

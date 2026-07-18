@@ -22,6 +22,12 @@ class ApplicationSettings(BaseSettings):
     log_level: str = "INFO"
     google_api_key: SecretStr | None = None
     gemini_model: str = "gemini-3.5-flash"
+    fpt_api_key: SecretStr | None = None
+    fpt_model: str = "Qwen3.6-27B"
+    fpt_base_url: str = "https://mkp-api.fptcloud.com"
+    fpt_enable_thinking: bool = False
+    fpt_timeout_seconds: float = Field(default=30.0, gt=0)
+    fpt_max_retries: int = Field(default=0, ge=0)
     qdrant_url: str | None = None
     qdrant_api_key: SecretStr | None = None
     qdrant_timeout_seconds: int = 60
