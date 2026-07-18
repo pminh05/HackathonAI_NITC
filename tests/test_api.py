@@ -13,7 +13,9 @@ from advisor.categories.air_conditioner import load_config as load_air_condition
 from advisor.categories.cooler_freezer import load_config as load_cooler_freezer_config
 from advisor.categories.dryer import load_config as load_dryer_config
 from advisor.categories.dishwasher import load_config as load_dishwasher_config
+from advisor.categories.printer import load_config as load_printer_config
 from advisor.categories.refrigerator import load_config
+from advisor.categories.tablet import load_config as load_tablet_config
 from advisor.categories.water_heater import load_config as load_water_heater_config
 from advisor.categories.washing_machine import load_config as load_washing_machine_config
 from advisor.schemas import (
@@ -96,6 +98,8 @@ class FakeQdrant:
                 load_dishwasher_config(),
                 load_cooler_freezer_config(),
                 load_water_heater_config(),
+                load_tablet_config(),
+                load_printer_config(),
             )
         }
 

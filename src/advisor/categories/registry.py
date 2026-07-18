@@ -152,4 +152,20 @@ def build_default_registry() -> CategoryRegistry:
             config_path=Path(__file__).with_name("water_heater") / "config.yaml",
         )
     )
+    registry.register(
+        CategoryDefinition(
+            name="tablet",
+            display_name="Máy tính bảng",
+            package_path="advisor.categories.tablet",
+            config_path=Path(__file__).with_name("tablet") / "config.yaml",
+        )
+    )
+    registry.register(
+        CategoryDefinition(
+            name="printer",
+            display_name="Máy in",
+            package_path="advisor.categories.printer",
+            config_path=Path(__file__).with_name("printer") / "config.yaml",
+        )
+    )
     return registry

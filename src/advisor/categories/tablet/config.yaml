@@ -1,0 +1,114 @@
+category: tablet
+display_name: Máy tính bảng
+collection: maytinhbang
+embedding_model: intfloat/multilingual-e5-small
+retrieval_limit: 12
+
+required_profile_fields:
+  - primary_usage
+  - budget
+  - connectivity
+
+payload_fields:
+  category_scope: metadata.category_scope
+  brand: metadata.brand
+  original_price: metadata.original_price_vnd
+  promotional_price: metadata.promotional_price_vnd
+  os_family: metadata.os_family
+  ram: metadata.ram_gb
+  storage: metadata.storage_gb
+  screen_size: metadata.screen_size_inch
+  weight: metadata.weight_g
+  connectivity_class: metadata.connectivity_class
+  mobile_generation: metadata.max_mobile_generation
+  supports_calls: metadata.supports_calls
+  supports_memory_card: metadata.supports_memory_card
+  display_family: metadata.display_family
+
+payload_indexes:
+  metadata.category_scope: keyword
+  metadata.brand: keyword
+  metadata.original_price_vnd: integer
+  metadata.promotional_price_vnd: integer
+  metadata.os_family: keyword
+  metadata.ram_gb: integer
+  metadata.storage_gb: integer
+  metadata.screen_size_inch: float
+  metadata.weight_g: integer
+  metadata.connectivity_class: keyword
+  metadata.max_mobile_generation: integer
+  metadata.supports_calls: bool
+  metadata.supports_memory_card: bool
+  metadata.display_family: keyword
+
+question_catalog:
+  primary_usage:
+    question_type: explicit
+    question: Bạn chủ yếu dùng máy tính bảng cho nhu cầu nào?
+    options:
+      - option_id: study_work
+        label: Học tập và làm việc
+        profile_updates: {usage_preferences: [study_work]}
+      - option_id: entertainment
+        label: Xem phim và giải trí
+        profile_updates: {usage_preferences: [entertainment]}
+      - option_id: gaming
+        label: Chơi game
+        profile_updates: {usage_preferences: [gaming]}
+      - option_id: drawing_notes
+        label: Vẽ và ghi chú bằng bút
+        profile_updates: {usage_preferences: [drawing_notes]}
+      - option_id: children
+        label: Cho trẻ em sử dụng
+        profile_updates: {usage_preferences: [children]}
+      - option_id: general
+        label: Dùng đa mục đích
+        profile_updates: {usage_preferences: [general]}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  budget:
+    question_type: explicit
+    question: Ngân sách tối đa bạn dự kiến dành cho máy tính bảng là bao nhiêu?
+    options:
+      - option_id: under_10m
+        label: Tối đa 10 triệu đồng
+        profile_updates: {budget_max_vnd: 10000000}
+      - option_id: 10m_20m
+        label: Khoảng 10–20 triệu đồng
+        profile_updates: {budget_max_vnd: 20000000}
+      - option_id: 20m_35m
+        label: Khoảng 20–35 triệu đồng
+        profile_updates: {budget_max_vnd: 35000000}
+      - option_id: over_35m
+        label: Trên 35 triệu đồng
+        profile_updates:
+          budget_segment: premium
+          soft_preferences: [premium]
+      - option_id: open
+        label: Chưa chốt ngân sách
+        profile_updates: {budget_segment: open}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  connectivity:
+    question_type: explicit
+    question: Bạn cần máy chỉ dùng Wi-Fi hay có thêm kết nối di động?
+    options:
+      - option_id: wifi_only
+        label: Chỉ cần Wi-Fi
+        profile_updates: {connectivity_segment: wifi_only}
+      - option_id: cellular_4g
+        label: Có 4G trở lên
+        profile_updates: {connectivity_segment: cellular_4g}
+      - option_id: cellular_5g
+        label: Bắt buộc có 5G
+        profile_updates: {connectivity_segment: cellular_5g}
+      - option_id: flexible
+        label: Không quan trọng
+        profile_updates: {connectivity_segment: flexible}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}

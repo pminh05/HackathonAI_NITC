@@ -1,8 +1,9 @@
 # Product Advisor API
 
 Tài liệu này mô tả HTTP API tư vấn tủ lạnh, máy lạnh, máy giặt, máy sấy quần áo,
-máy rửa chén, tủ mát, tủ đông và máy nước nóng. API dùng FastAPI, lưu trạng thái
-hội thoại theo `thread_id` và trả kết quả chat bằng Server-Sent Events (SSE).
+máy rửa chén, tủ mát, tủ đông, máy nước nóng, máy tính bảng và máy in. API dùng
+FastAPI, lưu trạng thái hội thoại theo `thread_id` và trả kết quả chat bằng
+Server-Sent Events (SSE).
 
 ## 1. Chạy dịch vụ
 
@@ -356,6 +357,22 @@ Catalog máy nước nóng hỗ trợ:
 | `heater_type` | `direct`, `indirect`, `solar`, `direct_multipoint`, `flexible`, `other` |
 | `water_supply` | `stable`, `low_pressure`, `multi_outlet`, `open`, `other` |
 | `budget` | `under_3m`, `3m_5m`, `5m_9m`, `over_9m`, `other` |
+
+Catalog máy tính bảng hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `primary_usage` | `study_work`, `entertainment`, `gaming`, `drawing_notes`, `children`, `general`, `other` |
+| `budget` | `under_10m`, `10m_20m`, `20m_35m`, `over_35m`, `open`, `other` |
+| `connectivity` | `wifi_only`, `cellular_4g`, `cellular_5g`, `flexible`, `other` |
+
+Catalog máy in hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `print_purpose` | `mono_documents`, `color_documents`, `photo`, `receipt_label`, `general`, `other` |
+| `monthly_volume` | `light`, `regular`, `office`, `high`, `open`, `other` |
+| `budget` | `under_3m`, `3m_5m`, `5m_10m`, `over_10m`, `open`, `other` |
 
 Client vẫn nên render theo `questions[].options` từ response thay vì phụ thuộc vào bảng này, vì catalog có thể thay đổi.
 

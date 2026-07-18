@@ -1,0 +1,120 @@
+category: printer
+display_name: Máy in
+collection: mayin
+embedding_model: intfloat/multilingual-e5-small
+retrieval_limit: 12
+
+required_profile_fields:
+  - print_purpose
+  - monthly_volume
+  - budget
+
+payload_fields:
+  category_scope: metadata.category_scope
+  brand: metadata.brand
+  original_price: metadata.original_price_vnd
+  promotional_price: metadata.promotional_price_vnd
+  print_technology: metadata.print_technology
+  color_mode: metadata.color_mode
+  monthly_volume_max: metadata.monthly_volume_max_pages
+  print_speed: metadata.print_speed_ppm
+  connection_tags: metadata.connection_tags
+  paper_size_tags: metadata.paper_size_tags
+  supports_duplex: metadata.supports_duplex
+  width: metadata.width_mm
+  height: metadata.height_mm
+  depth: metadata.depth_mm
+
+payload_indexes:
+  metadata.category_scope: keyword
+  metadata.brand: keyword
+  metadata.original_price_vnd: integer
+  metadata.promotional_price_vnd: integer
+  metadata.print_technology: keyword
+  metadata.color_mode: keyword
+  metadata.monthly_volume_max_pages: integer
+  metadata.print_speed_ppm: float
+  metadata.connection_tags: keyword
+  metadata.paper_size_tags: keyword
+  metadata.supports_duplex: bool
+  metadata.width_mm: integer
+  metadata.height_mm: integer
+  metadata.depth_mm: integer
+
+question_catalog:
+  print_purpose:
+    question_type: explicit
+    question: Bạn chủ yếu cần in loại nội dung nào?
+    options:
+      - option_id: mono_documents
+        label: Văn bản đen trắng
+        profile_updates: {usage_preferences: [mono_documents]}
+      - option_id: color_documents
+        label: Tài liệu màu
+        profile_updates:
+          usage_preferences: [color_documents]
+          hard_constraints: {color_modes: [color]}
+      - option_id: photo
+        label: Ảnh màu
+        profile_updates:
+          usage_preferences: [photo]
+          hard_constraints: {color_modes: [color]}
+      - option_id: receipt_label
+        label: Hóa đơn hoặc nhãn
+        profile_updates:
+          usage_preferences: [receipt_label]
+          hard_constraints: {technologies: [thermal]}
+      - option_id: general
+        label: Dùng nhiều mục đích
+        profile_updates: {usage_preferences: [general]}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  monthly_volume:
+    question_type: explicit
+    question: Bạn dự kiến in khoảng bao nhiêu trang mỗi tháng?
+    options:
+      - option_id: light
+        label: Tối đa khoảng 200 trang
+        profile_updates: {monthly_volume_segment: light}
+      - option_id: regular
+        label: Khoảng 200–500 trang
+        profile_updates: {monthly_volume_segment: regular}
+      - option_id: office
+        label: Khoảng 500–1.500 trang
+        profile_updates: {monthly_volume_segment: office}
+      - option_id: high
+        label: Trên 1.500 trang
+        profile_updates: {monthly_volume_segment: high}
+      - option_id: open
+        label: Chưa xác định
+        profile_updates: {monthly_volume_segment: open}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  budget:
+    question_type: explicit
+    question: Ngân sách tối đa bạn dự kiến dành cho máy in là bao nhiêu?
+    options:
+      - option_id: under_3m
+        label: Tối đa 3 triệu đồng
+        profile_updates: {budget_max_vnd: 3000000}
+      - option_id: 3m_5m
+        label: Khoảng 3–5 triệu đồng
+        profile_updates: {budget_max_vnd: 5000000}
+      - option_id: 5m_10m
+        label: Khoảng 5–10 triệu đồng
+        profile_updates: {budget_max_vnd: 10000000}
+      - option_id: over_10m
+        label: Trên 10 triệu đồng
+        profile_updates:
+          budget_segment: premium
+          soft_preferences: [premium]
+      - option_id: open
+        label: Chưa chốt ngân sách
+        profile_updates: {budget_segment: open}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
