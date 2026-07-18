@@ -126,5 +126,4 @@ Mỗi thành viên nhận một category nếu metadata đã sạch. Với categ
 phải chuẩn hóa ingestion, tách thành hai task tuần tự: `ingestion contract`
 trước, `advisor package` sau. Không cho hai người cùng sửa một package.
 
-Danh sách slug hiện có thể giao: `phone_recording_microphone`, `desktop` và
-`monitor`.
+Danh sách slug hiện có thể giao: `monitor`.

@@ -4,9 +4,9 @@ AI chatbot tư vấn và so sánh sản phẩm theo nhu cầu thực tế của 
 
 Phiên bản hiện tại triển khai đầy đủ cho **tủ lạnh**, **máy lạnh**, **máy giặt**,
 **máy sấy quần áo**, **máy rửa chén**, **tủ mát**, **tủ đông**,
-**máy nước nóng**, **micro karaoke**, **đồng hồ thông minh**, **máy tính bảng**
-và **máy in**, sau đó có thể mở rộng sang các sheet sản phẩm khác qua
-`CategorySpec`.
+**máy nước nóng**, **micro karaoke**, **micro thu âm**, **đồng hồ thông minh**,
+**máy tính để bàn**, **máy tính bảng** và **máy in**, sau đó có thể mở rộng sang
+các sheet sản phẩm khác qua `CategorySpec`.
 
 Tài liệu HTTP API, SSE và Human-in-the-loop: [docs/API.md](docs/API.md).
 
@@ -17,8 +17,8 @@ Tài liệu HTTP API, SSE và Human-in-the-loop: [docs/API.md](docs/API.md).
 - Tài khoản Google AI và `GOOGLE_API_KEY` hợp lệ.
 - Qdrant Cloud có bật Cloud Inference, collection `tulanh`, `maylanh`, `maygiat`,
   `maysayquanao`, `mayruachen`, `tumattudong`, `maynuocnong`,
-  `microkaraoke`, `donghothongminh`, `maytinhbang` và `mayin`. Các collection đã
-  chứa dữ liệu sản phẩm.
+  `microkaraoke`, `microthuamdienthoai`, `donghothongminh`, `maytinhdeban`,
+  `maytinhbang` và `mayin`. Các collection đã chứa dữ liệu sản phẩm.
 - npm đi kèm Node.js.
 
 Backend và frontend chạy thành hai process riêng:
@@ -175,6 +175,10 @@ PYTHONPATH=src .venv/bin/python -m advisor.categories.tablet.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.tablet.setup_indexes --apply
 PYTHONPATH=src .venv/bin/python -m advisor.categories.printer.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.printer.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.phone_recording_microphone.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.phone_recording_microphone.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.desktop.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.desktop.setup_indexes --apply
 ```
 
 Lệnh này chỉ tạo payload index; không tạo collection và không import catalog sản phẩm.
@@ -341,7 +345,9 @@ Máy rửa chén → mayruachen
 Tủ mát, tủ đông → tumattudong
 Máy nước nóng → maynuocnong
 Micro karaoke → microkaraoke
+Micro thu âm → microthuamdienthoai
 Đồng hồ thông minh → donghothongminh
+Máy tính để bàn → maytinhdeban
 Máy tính bảng → maytinhbang
 Máy in → mayin
 Laptop     → products_laptop
@@ -359,8 +365,9 @@ cho metadata filter. Thương hiệu cùng các trường mô tả dài như cô
 ích được đưa vào semantic retrieval.
 
 Collection `tulanh`, `maylanh`, `maygiat`, `maysayquanao`, `mayruachen`,
-`tumattudong`, `maynuocnong`, `microkaraoke`, `donghothongminh`, `maytinhbang`
-và `mayin` dùng embedding `intfloat/multilingual-e5-small`. Trước khi chạy live,
+`tumattudong`, `maynuocnong`, `microkaraoke`, `microthuamdienthoai`,
+`donghothongminh`, `maytinhdeban`, `maytinhbang` và `mayin` dùng embedding
+`intfloat/multilingual-e5-small`. Trước khi chạy live,
 kiểm tra payload index của từng category:
 
 ```bash
@@ -372,7 +379,9 @@ PYTHONPATH=src .venv/bin/python -m advisor.categories.dishwasher.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.cooler_freezer.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.water_heater.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.karaoke_microphone.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.phone_recording_microphone.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.smartwatch.setup_indexes
+PYTHONPATH=src .venv/bin/python -m advisor.categories.desktop.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.tablet.setup_indexes
 PYTHONPATH=src .venv/bin/python -m advisor.categories.printer.setup_indexes
 ```
@@ -388,7 +397,9 @@ PYTHONPATH=src .venv/bin/python -m advisor.categories.dishwasher.setup_indexes -
 PYTHONPATH=src .venv/bin/python -m advisor.categories.cooler_freezer.setup_indexes --apply
 PYTHONPATH=src .venv/bin/python -m advisor.categories.water_heater.setup_indexes --apply
 PYTHONPATH=src .venv/bin/python -m advisor.categories.karaoke_microphone.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.phone_recording_microphone.setup_indexes --apply
 PYTHONPATH=src .venv/bin/python -m advisor.categories.smartwatch.setup_indexes --apply
+PYTHONPATH=src .venv/bin/python -m advisor.categories.desktop.setup_indexes --apply
 PYTHONPATH=src .venv/bin/python -m advisor.categories.tablet.setup_indexes --apply
 PYTHONPATH=src .venv/bin/python -m advisor.categories.printer.setup_indexes --apply
 ```
@@ -538,7 +549,19 @@ product-advisor/
 │   │   │   ├── prompts.py
 │   │   │   ├── filter_builder.py
 │   │   │   └── normalizer.py
+│   │   ├── phone_recording_microphone/
+│   │   │   ├── config.yaml
+│   │   │   ├── schemas.py
+│   │   │   ├── prompts.py
+│   │   │   ├── filter_builder.py
+│   │   │   └── normalizer.py
 │   │   ├── smartwatch/
+│   │   │   ├── config.yaml
+│   │   │   ├── schemas.py
+│   │   │   ├── prompts.py
+│   │   │   ├── filter_builder.py
+│   │   │   └── normalizer.py
+│   │   ├── desktop/
 │   │   │   ├── config.yaml
 │   │   │   ├── schemas.py
 │   │   │   ├── prompts.py
@@ -576,7 +599,9 @@ product-advisor/
         ├── test_dishwasher.py
         ├── test_water_heater.py
         ├── test_karaoke_microphone.py
+        ├── test_phone_recording_microphone.py
         ├── test_smartwatch.py
+        ├── test_desktop.py
         ├── test_tablet.py
         └── test_printer.py
 ```
