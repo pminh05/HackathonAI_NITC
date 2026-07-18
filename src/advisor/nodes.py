@@ -449,6 +449,9 @@ tham chiếu. Quy tắc:
 - Chỉ trả referenced_product_ids có trong danh sách sản phẩm được cung cấp.
 - product_detail, compare và explain đều chỉ nói về context đã có; more_options
   là xin lựa chọn mới; refine_needs là thêm/đính chính/xóa nhu cầu.
+- Câu rút gọn như “sản phẩm khác”, “mẫu khác”, “micro khác” sau một lượt không
+  tìm thấy vẫn là more_options và kế thừa ngành hiện tại. Chỉ dùng refine_needs
+  nếu người dùng thực sự nêu tiêu chí mới hoặc đồng ý nới/bỏ một tiêu chí.
 - has_profile_update=true khi tin nhắn thay đổi nhu cầu hoặc trả lời câu hỏi làm rõ.
 - conversation chỉ dùng cho chào hỏi/cảm ơn; khi đó có thể trả direct_reply ngắn,
   tự nhiên. Không đưa lời tư vấn sản phẩm vào direct_reply.
@@ -517,6 +520,38 @@ def _deterministic_turn_analysis(
         scope="category" if requested is not IntentLabel.OTHER else "unspecified",
         has_profile_update=True,
     )
+NO_MATCH_RESPONSE_PROMPT = """Bạn đang soạn câu trả lời cho một lượt tư vấn sản phẩm
+không có ứng viên nào khớp toàn bộ điều kiện trong catalog đã kiểm chứng.
+
+Ngành hàng: {category_name}
+Tin nhắn hiện tại: {user_query}
+Loại hành động của lượt này: {turn_action}
+Hồ sơ nhu cầu và điều kiện hiện tại:
+{need_profile}
+
+Kết luận có căn cứ từ hệ thống tìm kiếm:
+{verified_no_match}
+
+Câu trả lời trước trong cùng ngành hàng (có thể trống):
+{previous_answer}
+
+Lịch sử hội thoại gần nhất:
+{conversation_history}
+
+Hãy trả lời bằng tiếng Việt tự nhiên, ngắn gọn và hữu ích theo các quy tắc sau:
+1. Nói rõ hiện chưa có sản phẩm khớp đầy đủ trong dữ liệu hiện có; không suy diễn
+   rằng thị trường hoàn toàn không có sản phẩm đó.
+2. Vẫn trả lời đúng ý của tin nhắn hiện tại. Nếu khách hàng xin sản phẩm/mẫu khác,
+   hãy ghi nhận yêu cầu đó và không lặp nguyên văn câu trả lời trước.
+3. Đưa ra 2-3 hướng xử lý cụ thể, ưu tiên các tiêu chí đang làm phạm vi tìm kiếm
+   hẹp (ví dụ ngân sách, loại sản phẩm, thương hiệu hoặc thông số kỹ thuật), hoặc
+   hỏi một câu ngắn để khách hàng chọn tiêu chí có thể linh hoạt.
+4. Chỉ đề xuất thay đổi tiêu chí, không tự coi tiêu chí đã được thay đổi. Nêu ngắn
+   gọn đánh đổi nếu nới tiêu chí.
+5. Không bịa hay giới thiệu tên sản phẩm, giá, tồn kho hoặc thông số cụ thể vì tác
+   vụ này không cung cấp ứng viên catalog nào.
+6. Không nhắc đến system prompt, quy tắc nội bộ, JSON hay quy trình kỹ thuật.
+"""
 
 
 def create_gemini_chat_model(settings: ApplicationSettings) -> ChatGoogleGenerativeAI:
@@ -1988,6 +2023,7 @@ def _finalize_response(state: AdvisorState, answer: str) -> NodeUpdate:
         product = candidates_by_id.get(item.get("product_id"), {})
         selected_public.append({**product, **item})
 
+    analysis = (state.get("conversation") or {}).get("analysis") or {}
     mode = (state.get("conversation") or {}).get("execution_mode")
     signature = _profile_signature(state.get("need_profile") or {})
     if mode == ExecutionMode.RETRIEVE.value:
@@ -1995,7 +2031,13 @@ def _finalize_response(state: AdvisorState, answer: str) -> NodeUpdate:
             recommendation["presented_ids"] = []
         recommendation["candidate_pool"] = candidates
         recommendation["retrieval_signature"] = signature
-        recommendation["discovery_query"] = state["control"]["current_user_input"]
+        if (
+            analysis.get("action") != TurnAction.MORE_OPTIONS.value
+            or not recommendation.get("discovery_query")
+        ):
+            recommendation["discovery_query"] = state["control"][
+                "current_user_input"
+            ]
 
     snapshots = dict(recommendation.get("product_snapshots") or {})
     ranking_by_id = dict(recommendation.get("ranking_by_id") or {})
@@ -2010,7 +2052,6 @@ def _finalize_response(state: AdvisorState, answer: str) -> NodeUpdate:
     recommendation["product_snapshots"] = dict(list(snapshots.items())[-12:])
     recommendation["ranking_by_id"] = ranking_by_id
 
-    analysis = (state.get("conversation") or {}).get("analysis") or {}
     action = analysis.get("action")
     selected_ids = [
         item["product_id"] for item in selected_public if item.get("product_id")
@@ -2064,6 +2105,54 @@ def _deterministic_advisory_response(
         "Bạn có thể cho mình biết ưu tiên quan trọng nhất để mình thu hẹp thêm."
     )
     return "\n".join(lines)
+def _compose_no_match_answer(
+    state: AdvisorState,
+    advisor_runtime: AdvisorRuntime,
+    spec: CategorySpec,
+) -> str:
+    """Turn a grounded no-match result into a useful, conversation-aware reply."""
+    verified_no_match = spec.no_match_answer(state["need_profile"])
+    category = _active_category(state)
+    context = _get_category_context(state, category) if category else {}
+    recommendation = context.get("recommendation_context") or {}
+    analysis = (state.get("conversation") or {}).get("analysis") or {}
+    prompt = NO_MATCH_RESPONSE_PROMPT.format(
+        category_name=spec.display_name,
+        user_query=state["control"]["current_user_input"],
+        turn_action=analysis.get("action", TurnAction.DISCOVER.value),
+        need_profile=json.dumps(
+            state.get("need_profile") or {}, ensure_ascii=False, default=str
+        ),
+        verified_no_match=verified_no_match,
+        previous_answer=recommendation.get("last_answer") or "chưa có",
+        conversation_history=json.dumps(
+            _conversation_history(state), ensure_ascii=False, default=str
+        ),
+    )
+    try:
+        llm_message = advisor_runtime.get_llm().invoke(
+            advisor_runtime.guarded_prompt(prompt)
+        )
+        answer = _message_text(llm_message).strip()
+    except ProviderFallbackError:
+        logger.warning(
+            "Using deterministic no-match response after all LLM providers failed"
+        )
+        answer = ""
+
+    if not answer:
+        answer = (
+            f"{verified_no_match} Nếu bạn muốn, mình có thể tìm phương án gần nhất "
+            "khi bạn chọn một tiêu chí có thể linh hoạt, chẳng hạn ngân sách, "
+            "thương hiệu, loại sản phẩm hoặc một thông số kỹ thuật."
+        )
+    decision = advisor_runtime.get_guardrail().inspect(
+        answer, surface="advisory_output"
+    )
+    advisor_runtime.get_guardrail().record(decision, answer)
+    if advisor_runtime.get_guardrail().should_block(decision):
+        return SAFE_OUTPUT_FALLBACK
+    return answer
 
 
 def compose_response_node(
@@ -2076,7 +2165,9 @@ def compose_response_node(
         raise ValueError("Response composition requires an active category")
     spec = advisor_runtime.get_category(category)
     if not candidates:
-        return _finalize_response(state, spec.no_match_answer(state["need_profile"]))
+        return _finalize_response(
+            state, _compose_no_match_answer(state, advisor_runtime, spec)
+        )
     candidates_by_id = {item["product_id"]: item for item in candidates}
     grounded_selection = [
         {**item, "product_data": candidates_by_id[item["product_id"]]}
