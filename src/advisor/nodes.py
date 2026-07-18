@@ -145,7 +145,7 @@ PROFILE_QUESTION_PATHS = {
 
 
 def create_gemini_chat_model(settings: ApplicationSettings) -> ChatGoogleGenerativeAI:
-    """Create Gemini 2.5 Flash with thinking disabled for every graph call."""
+    """Create the configured Gemini model with the lowest thinking level."""
     try:
         from langchain_google_genai import ChatGoogleGenerativeAI
     except ImportError as exc:
@@ -156,7 +156,7 @@ def create_gemini_chat_model(settings: ApplicationSettings) -> ChatGoogleGenerat
     return ChatGoogleGenerativeAI(
         model=settings.gemini_model,
         google_api_key=settings.google_api_key.get_secret_value(),
-        thinking_budget=0,
+        thinking_level="minimal",
         include_thoughts=False,
         temperature=0,
         max_retries=2,

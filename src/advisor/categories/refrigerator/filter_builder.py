@@ -19,46 +19,47 @@ FEATURE_PROFILE_KEYS = {
 # reference from payload filters. Keep this whitelist in sync with the
 # collection schema so an obsolete/raw metadata key cannot leak into a query.
 STANDARDIZED_METADATA_KEYS = {
-    "kieu_dang_chuan",
-    "thoi_gian_ra_mat_chuan",
-    "nam_ra_mat",
-    "dung_tich_tong_lit",
-    "dung_tich_ngan_da_lit",
-    "dung_tich_ngan_lanh_lit",
-    "dung_tich_su_dung_lit",
-    "dien_nang_kwh_nam",
-    "dien_nang_kwh_ngay",
-    "so_nguoi_min",
-    "so_nguoi_max",
-    "so_cua_chuan",
-    "cao_cm",
-    "ngang_cm",
-    "sau_cm",
-    "khoi_luong_may_kg",
-    "co_lay_nuoc_ngoai",
-    "co_che_do_tu_dong",
-    "co_inverter",
-    "so_cong_nghe_lam_lanh",
-    "so_cong_nghe_tiet_kiem_dien",
-    "so_cong_nghe_bao_quan",
-    "so_tien_ich",
-    "gia_goc_vnd",
-    "gia_khuyen_mai_vnd",
-    "tong_dung_tich_cac_ngan_da_biet_lit",
-    "ty_le_ngan_da_pct",
-    "dien_nang_kwh_nam_moi_lit",
-    "phan_tram_giam_gia",
-    "dung_tich_ngan_chuyen_doi_lit",
+    "Kiểu dáng chuẩn",
+    "Thời gian ra mắt chuẩn",
+    "Năm ra mắt",
+    "Dung tích tổng lít",
+    "Dung tích ngăn đá lít",
+    "Dung tích ngăn lạnh lít",
+    "Dung tích sử dụng lít",
+    "Điện năng kWh năm",
+    "Điện năng kWh ngày",
+    "Số người tối thiểu",
+    "Số người tối đa",
+    "Số cửa chuẩn",
+    "Cao cm",
+    "Ngang cm",
+    "Sâu cm",
+    "Khối lượng máy kg",
+    "Có lấy nước ngoài",
+    "Có chế độ tự động",
+    "Có inverter",
+    "Số công nghệ làm lạnh",
+    "Số công nghệ tiết kiệm điện",
+    "Số công nghệ bảo quản",
+    "Số tiện ích",
+    "Giá gốc vnd",
+    "Giá khuyến mãi vnd",
+    "Tổng dung tích các ngăn đã biết lít",
+    "Tỷ lệ ngăn đá pct",
+    "Điện năng kWh năm mỗi lít",
+    "Phần trăm giảm giá",
+    "Dung tích ngăn chuyển đổi lít",
 }
 
 
+def _metadata_path(key: str) -> str:
+    """Return a Qdrant JSON path with the Vietnamese leaf safely quoted."""
+    return f'metadata."{key}"'
+
+
 def _validate_payload_fields(fields: dict[str, str]) -> None:
-    invalid = {
-        path
-        for path in fields.values()
-        if not path.startswith("metadata.")
-        or path.removeprefix("metadata.") not in STANDARDIZED_METADATA_KEYS
-    }
+    supported_paths = {_metadata_path(key) for key in STANDARDIZED_METADATA_KEYS}
+    invalid = {path for path in fields.values() if path not in supported_paths}
     if invalid:
         joined = ", ".join(sorted(invalid))
         raise ValueError(f"Unsupported tulanh metadata filter field(s): {joined}")

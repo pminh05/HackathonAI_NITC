@@ -60,32 +60,32 @@ def normalize_candidate(point: Any) -> dict[str, Any]:
     """Whitelist useful catalog fields and omit noisy promotion metadata."""
     payload = point.payload or {}
     metadata = payload.get("metadata") or {}
-    promotional_price = metadata.get("gia_khuyen_mai_vnd")
-    original_price = metadata.get("gia_goc_vnd")
+    promotional_price = metadata.get("Giá khuyến mãi vnd")
+    original_price = metadata.get("Giá gốc vnd")
     candidate = ProductCandidate(
         product_id=str(payload.get("product_id") or point.id),
         name=str(payload.get("name") or "Sản phẩm chưa có tên"),
         qdrant_score=float(point.score),
         brand=metadata.get("brand"),
-        style=metadata.get("kieu_dang_chuan"),
+        style=metadata.get("Kiểu dáng chuẩn"),
         effective_price_vnd=promotional_price or original_price,
         original_price_vnd=original_price,
         promotional_price_vnd=promotional_price,
-        capacity_lit=metadata.get("dung_tich_su_dung_lit"),
+        capacity_lit=metadata.get("Dung tích sử dụng lít"),
         suitable_for=metadata.get("Số người sử dụng"),
         description=payload.get("text"),
     ).model_dump(mode="json")
     candidate.update(
         {
-            "freezer_capacity_lit": metadata.get("dung_tich_ngan_da_lit"),
-            "annual_energy_kwh": metadata.get("dien_nang_kwh_nam"),
-            "inverter": metadata.get("co_inverter"),
-            "external_water": metadata.get("co_lay_nuoc_ngoai"),
-            "automatic_mode": metadata.get("co_che_do_tu_dong"),
+            "freezer_capacity_lit": metadata.get("Dung tích ngăn đá lít"),
+            "annual_energy_kwh": metadata.get("Điện năng kWh năm"),
+            "inverter": metadata.get("Có inverter"),
+            "external_water": metadata.get("Có lấy nước ngoài"),
+            "automatic_mode": metadata.get("Có chế độ tự động"),
             "dimensions_cm": {
-                "width": metadata.get("ngang_cm"),
-                "height": metadata.get("cao_cm"),
-                "depth": metadata.get("sau_cm"),
+                "width": metadata.get("Ngang cm"),
+                "height": metadata.get("Cao cm"),
+                "depth": metadata.get("Sâu cm"),
             },
             "utilities": metadata.get("Tiện ích"),
             "preservation": metadata.get("Công nghệ bảo quản thực phẩm"),

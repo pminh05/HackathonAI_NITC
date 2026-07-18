@@ -439,6 +439,8 @@ def create_app(
                     raise AdvisorConfigurationError(
                         "Qdrant payload indexes are missing: "
                         + ", ".join(sorted(missing))
+                        + ". Run `PYTHONPATH=src .venv/bin/python -m "
+                        "advisor.categories.refrigerator.setup_indexes --apply`."
                     )
             async with open_async_sqlite_checkpointer(app_settings) as checkpointer:
                 application.state.graph = build_graph(

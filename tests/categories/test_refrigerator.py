@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import runpy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Command
-from qdrant_client import models
+from qdrant_client import QdrantClient, models
 
 from advisor.categories.refrigerator import load_config
 from advisor.categories.refrigerator.filter_builder import (
@@ -19,6 +20,7 @@ from advisor.categories.refrigerator.filter_builder import (
 from advisor.categories.refrigerator.setup_indexes import ensure_payload_indexes
 from advisor.graph import build_graph
 from advisor.nodes import apply_profile_patch
+from advisor.retrieval.qdrant import normalize_candidate
 from advisor.schemas import (
     ClarificationDecision,
     CustomAnswerInterpretation,
@@ -29,6 +31,13 @@ from advisor.schemas import (
     RefrigeratorNeedExtraction,
     TurnAnalysisResult,
 )
+
+
+CHANGE_NAME_MODULE = runpy.run_path(
+    Path(__file__).parents[2] / "ingestion/tu_lanh/changeName.py"
+)
+KEY_MAPPING = CHANGE_NAME_MODULE["KEY_MAPPING"]
+normalize_metadata = CHANGE_NAME_MODULE["normalize_metadata"]
 
 
 class FakeStructuredModel:
@@ -149,12 +158,12 @@ class FakeQdrant:
                     "text": "Dung tích 350 lít, có Inverter.",
                     "metadata": {
                         "brand": "Test",
-                        "kieu_dang_chuan": "Ngăn đá trên",
-                        "gia_goc_vnd": 18_000_000,
-                        "gia_khuyen_mai_vnd": 15_000_000,
-                        "dung_tich_su_dung_lit": 350,
+                        "Kiểu dáng chuẩn": "Ngăn đá trên",
+                        "Giá gốc vnd": 18_000_000,
+                        "Giá khuyến mãi vnd": 15_000_000,
+                        "Dung tích sử dụng lít": 350,
                         "Số người sử dụng": "3 - 4 người",
-                        "co_inverter": True,
+                        "Có inverter": True,
                     },
                 },
             )
@@ -197,11 +206,17 @@ def test_filter_contains_budget_people_and_explicit_constraints() -> None:
     assert query_filter is not None
     dumped = query_filter.model_dump(mode="json", exclude_none=True)
     text = str(dumped)
-    assert "metadata.gia_khuyen_mai_vnd" in text
-    assert "metadata.so_nguoi_min" in text
+    assert 'metadata."Giá khuyến mãi vnd"' in text
+    assert 'metadata."Số người tối thiểu"' in text
     assert "metadata.brand" not in text
-    assert "metadata.ngang_cm" in text
-    assert "metadata.co_inverter" in text
+    assert 'metadata."Ngang cm"' in text
+    assert 'metadata."Có inverter"' in text
+
+
+def _metadata_key(path: str) -> str:
+    prefix = 'metadata."'
+    assert path.startswith(prefix) and path.endswith('"')
+    return path[len(prefix) : -1]
 
 
 def test_filter_config_only_uses_standardized_tulanh_metadata_keys() -> None:
@@ -209,14 +224,131 @@ def test_filter_config_only_uses_standardized_tulanh_metadata_keys() -> None:
     fields = config["payload_fields"].values()
     indexes = config["payload_indexes"]
 
-    assert all(path.startswith("metadata.") for path in fields)
-    assert {
-        path.removeprefix("metadata.") for path in fields
-    } <= STANDARDIZED_METADATA_KEYS
-    assert {
-        path.removeprefix("metadata.") for path in indexes
-    } <= STANDARDIZED_METADATA_KEYS
+    assert STANDARDIZED_METADATA_KEYS == set(KEY_MAPPING.values())
+    assert {_metadata_key(path) for path in fields} <= STANDARDIZED_METADATA_KEYS
+    assert {_metadata_key(path) for path in indexes} <= STANDARDIZED_METADATA_KEYS
     assert set(fields) <= set(indexes)
+    assert indexes['metadata."Ngang cm"'] == "float"
+    assert indexes['metadata."Cao cm"'] == "float"
+    assert indexes['metadata."Sâu cm"'] == "float"
+
+
+def test_ingestion_normalizes_dimension_values_as_float() -> None:
+    metadata = normalize_metadata(
+        {
+            "ngang_cm": 59,
+            "cao_cm": 170.5,
+            "sau_cm": 66,
+            "dung_tich_su_dung_lit": 350,
+        }
+    )
+
+    assert metadata == {
+        "Ngang cm": 59.0,
+        "Cao cm": 170.5,
+        "Sâu cm": 66.0,
+        "Dung tích sử dụng lít": 350,
+    }
+    assert all(
+        isinstance(metadata[key], float) for key in ("Ngang cm", "Cao cm", "Sâu cm")
+    )
+
+
+def test_filter_matches_vietnamese_metadata_in_local_qdrant() -> None:
+    client = QdrantClient(":memory:")
+    client.create_collection(
+        collection_name="tulanh-test",
+        vectors_config=models.VectorParams(size=2, distance=models.Distance.COSINE),
+    )
+    client.upsert(
+        collection_name="tulanh-test",
+        points=[
+            models.PointStruct(
+                id=1,
+                vector=[1.0, 0.0],
+                payload={
+                    "metadata": {
+                        "Kiểu dáng chuẩn": "Ngăn đá dưới",
+                        "Giá gốc vnd": 18_000_000,
+                        "Giá khuyến mãi vnd": 15_000_000,
+                        "Dung tích sử dụng lít": 350,
+                        "Số người tối thiểu": 3,
+                        "Số người tối đa": 4,
+                        "Ngang cm": 59.6,
+                        "Cao cm": 170.5,
+                        "Sâu cm": 66.2,
+                        "Có inverter": True,
+                    }
+                },
+            )
+        ],
+        wait=True,
+    )
+    query_filter = build_filter(
+        {
+            "household_size": 4,
+            "budget_max_vnd": 20_000_000,
+            "hard_constraints": {
+                "styles": ["Ngăn đá dưới"],
+                "min_capacity_lit": 300,
+                "max_width_cm": 60,
+                "required_features": ["inverter"],
+            },
+        }
+    )
+
+    result = client.query_points(
+        collection_name="tulanh-test",
+        query=[1.0, 0.0],
+        query_filter=query_filter,
+        limit=1,
+    )
+
+    assert [point.id for point in result.points] == [1]
+
+
+def test_candidate_normalization_reads_vietnamese_metadata() -> None:
+    candidate = normalize_candidate(
+        SimpleNamespace(
+            id="point-1",
+            score=0.9,
+            payload={
+                "product_id": "sku-1",
+                "name": "Tủ lạnh thử nghiệm",
+                "text": "Mô tả sản phẩm.",
+                "metadata": {
+                    "brand": "Test",
+                    "Kiểu dáng chuẩn": "Ngăn đá dưới",
+                    "Giá gốc vnd": 18_000_000,
+                    "Giá khuyến mãi vnd": 15_000_000,
+                    "Dung tích sử dụng lít": 350,
+                    "Dung tích ngăn đá lít": 92,
+                    "Điện năng kWh năm": 381,
+                    "Số người sử dụng": "3 - 4 người",
+                    "Có inverter": True,
+                    "Có lấy nước ngoài": True,
+                    "Có chế độ tự động": False,
+                    "Ngang cm": 59.6,
+                    "Cao cm": 170.5,
+                    "Sâu cm": 66.2,
+                },
+            },
+        )
+    )
+
+    assert candidate["style"] == "Ngăn đá dưới"
+    assert candidate["effective_price_vnd"] == 15_000_000
+    assert candidate["capacity_lit"] == 350
+    assert candidate["freezer_capacity_lit"] == 92
+    assert candidate["annual_energy_kwh"] == 381
+    assert candidate["inverter"] is True
+    assert candidate["external_water"] is True
+    assert candidate["automatic_mode"] is False
+    assert candidate["dimensions_cm"] == {
+        "width": 59.6,
+        "height": 170.5,
+        "depth": 66.2,
+    }
 
 
 def test_generic_query_interrupts_once_and_resumes_to_advice() -> None:
@@ -354,27 +486,27 @@ def test_non_refrigerator_intent_returns_placeholder_without_qdrant() -> None:
 def test_index_setup_is_idempotent() -> None:
     qdrant = FakeQdrant()
     config = load_config()
-    removed_field = "metadata.gia_goc_vnd"
+    removed_field = 'metadata."Ngang cm"'
     del qdrant.payload_schema[removed_field]
 
     missing = ensure_payload_indexes(
         qdrant, "tulanh", config["payload_indexes"], apply=False
     )
-    assert missing == {removed_field: "integer"}
+    assert missing == {removed_field: "float"}
     assert qdrant.created == []
 
     remaining = ensure_payload_indexes(
         qdrant, "tulanh", config["payload_indexes"], apply=True
     )
     assert remaining == {}
-    assert qdrant.created == [(removed_field, "integer")]
+    assert qdrant.created == [(removed_field, "float")]
     assert (
         ensure_payload_indexes(
             qdrant, "tulanh", config["payload_indexes"], apply=True
         )
         == {}
     )
-    assert qdrant.created == [(removed_field, "integer")]
+    assert qdrant.created == [(removed_field, "float")]
 
 
 def test_other_requires_custom_text() -> None:

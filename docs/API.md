@@ -385,7 +385,7 @@ Swagger UI phù hợp để kiểm tra schema và request. Tùy trình duyệt, 
 | Biến | Mặc định | Ý nghĩa |
 | --- | --- | --- |
 | `GOOGLE_API_KEY` | Không có | API key cho Gemini |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Model backbone |
+| `GEMINI_MODEL` | `gemini-3.5-flash` | Model backbone |
 | `QDRANT_URL` | Không có | URL Qdrant |
 | `QDRANT_API_KEY` | Không có | API key Qdrant |
 | `QDRANT_TIMEOUT_SECONDS` | `60` | Timeout Qdrant |

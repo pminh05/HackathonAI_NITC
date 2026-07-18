@@ -45,26 +45,37 @@ KEY_MAPPING = {
     "dung_tich_ngan_chuyen_doi_lit": "Dung tích ngăn chuyển đổi lít",
 }
 
+FLOAT_METADATA_KEYS = {"cao_cm", "ngang_cm", "sau_cm"}
+
 INPUT_FILE = "data/tu_lanh_processed.json"
 OUTPUT_FILE = "data/tu_lanh_processed_vi.json"
 
-with open(INPUT_FILE, "r", encoding="utf-8") as f:
-    data = json.load(f)
 
-for item in data:
-    if "metadata" not in item:
-        continue
-
-    metadata = item["metadata"]
-
-    new_metadata = {}
+def normalize_metadata(metadata):
+    normalized = {}
     for key, value in metadata.items():
         new_key = KEY_MAPPING.get(key, key)
-        new_metadata[new_key] = value
+        if key in FLOAT_METADATA_KEYS and isinstance(value, (int, float)):
+            value = float(value)
+        normalized[new_key] = value
+    return normalized
 
-    item["metadata"] = new_metadata
 
-with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-    json.dump(data, f, ensure_ascii=False, indent=2)
+def main():
+    with open(INPUT_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
 
-print(f"Đã lưu file: {OUTPUT_FILE}")
+    for item in data:
+        if "metadata" not in item:
+            continue
+
+        item["metadata"] = normalize_metadata(item["metadata"])
+
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    print(f"Đã lưu file: {OUTPUT_FILE}")
+
+
+if __name__ == "__main__":
+    main()

@@ -98,11 +98,11 @@ class FakeQdrant:
                         "text": "Tủ lạnh 350 lít có Inverter.",
                         "metadata": {
                             "brand": "Test",
-                            "gia_goc_vnd": 18_000_000,
-                            "gia_khuyen_mai_vnd": 15_000_000,
-                            "dung_tich_su_dung_lit": 350,
+                            "Giá gốc vnd": 18_000_000,
+                            "Giá khuyến mãi vnd": 15_000_000,
+                            "Dung tích sử dụng lít": 350,
                             "Số người sử dụng": "3 - 4 người",
-                            "co_inverter": True,
+                            "Có inverter": True,
                         },
                     },
                 )

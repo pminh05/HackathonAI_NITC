@@ -21,7 +21,7 @@ class ApplicationSettings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
     google_api_key: SecretStr | None = None
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.5-flash"
     qdrant_url: str | None = None
     qdrant_api_key: SecretStr | None = None
     qdrant_timeout_seconds: int = 60

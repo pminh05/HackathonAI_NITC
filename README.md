@@ -55,7 +55,7 @@ Cập nhật tối thiểu ba biến bắt buộc trong `.env`:
 
 ```dotenv
 GOOGLE_API_KEY=your-google-api-key
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.5-flash
 QDRANT_URL=https://your-cluster.qdrant.io
 QDRANT_API_KEY=your-qdrant-api-key
 ```

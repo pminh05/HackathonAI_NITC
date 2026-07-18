@@ -9,7 +9,7 @@ from qdrant_client import QdrantClient, models
 
 load_dotenv()
 
-INPUT_FILE = Path(r"data\tu_lanh_embedded.json")
+INPUT_FILE = Path("data/tu_lanh_embedded.json")
 QDRANT_URL = os.getenv("QDRANT_URL")
 COLLECTION_NAME = "tulanh"
 BATCH_SIZE = 64
