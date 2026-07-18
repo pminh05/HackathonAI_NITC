@@ -79,7 +79,9 @@ FPT_MAX_RETRIES=0
 ```
 
 Fallback được áp dụng cho cả phản hồi văn bản và structured output. Nếu chưa
-cấu hình `FPT_API_KEY`, ứng dụng tiếp tục chỉ dùng Gemini như trước.
+cấu hình `FPT_API_KEY`, ứng dụng tiếp tục chỉ dùng Gemini như trước. Hệ thống
+cũng hỗ trợ chạy FPT-only khi để trống `GOOGLE_API_KEY`; cách này tránh một lần
+gọi Gemini thất bại ở mỗi lần khởi động nếu Google key không còn hợp lệ.
 `FPT_ENABLE_THINKING=false` truyền hard switch của Qwen vào chat template để
 model trả lời trực tiếp mà không sinh thinking block.
 FPT dùng function calling cho các schema quyết định hữu hạn, nhưng riêng
@@ -105,7 +107,16 @@ API_HOST=127.0.0.1
 API_PORT=8000
 API_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 SSE_HEARTBEAT_SECONDS=15
+GUARDRAIL_MODE=enforce
+GUARDRAIL_OUTPUT_HOLDBACK_CHARS=64
 ```
+
+Guardrail prompt-injection chạy hoàn toàn trong process: không thêm model call,
+network hop hay Qdrant query. Input, lịch sử, custom clarification answer và
+candidate lấy từ Qdrant đều được scan bằng pattern đã compile; model prompt
+được tách thành system policy và task data. Output SSE giữ lại 64 ký tự cuối để
+phát hiện pattern đi qua ranh giới token trước khi nội dung được gửi ra client.
+`GUARDRAIL_MODE=observe` chỉ nên dùng tạm thời để đo false positive.
 
 Backend uses SQLite checkpoints by default. For a deployed Supabase/PostgreSQL
 backend, configure the Session pooler connection string instead:

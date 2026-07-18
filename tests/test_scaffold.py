@@ -67,6 +67,8 @@ def test_settings_read_fake_environment(monkeypatch) -> None:
     monkeypatch.setenv("FPT_ENABLE_THINKING", "true")
     monkeypatch.setenv("FPT_TIMEOUT_SECONDS", "12.5")
     monkeypatch.setenv("FPT_MAX_RETRIES", "1")
+    monkeypatch.setenv("GUARDRAIL_MODE", "observe")
+    monkeypatch.setenv("GUARDRAIL_OUTPUT_HOLDBACK_CHARS", "96")
 
     settings = ApplicationSettings(_env_file=None)
 
@@ -80,6 +82,8 @@ def test_settings_read_fake_environment(monkeypatch) -> None:
     assert settings.fpt_enable_thinking is True
     assert settings.fpt_timeout_seconds == 12.5
     assert settings.fpt_max_retries == 1
+    assert settings.guardrail_mode == "observe"
+    assert settings.guardrail_output_holdback_chars == 96
 
 
 def test_public_frontend_origin_is_included_in_cors() -> None:
@@ -93,3 +97,23 @@ def test_public_frontend_origin_is_included_in_cors() -> None:
         "http://localhost:5173",
         "https://example.vercel.app",
     ]
+
+
+def test_supported_categories_question_does_not_require_llm() -> None:
+    from langchain_core.messages import HumanMessage
+
+    from advisor.graph import build_graph
+
+    class ExplodingLLM:
+        def with_structured_output(self, *_: object, **__: object) -> object:
+            raise AssertionError("The supported-category list must not call an LLM")
+
+    graph = build_graph(llm=ExplodingLLM())
+    result = graph.invoke(
+        {"messages": [HumanMessage(content="Có những ngành hàng nào?")]},
+        {"configurable": {"thread_id": "supported-category-list"}},
+    )
+
+    assert result["control"]["stage"] == "completed"
+    assert "Máy giặt" in result["response"]["answer"]
+    assert "Máy in" in result["response"]["answer"]

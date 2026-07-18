@@ -382,7 +382,7 @@ Client vẫn nên render theo `questions[].options` từ response thay vì phụ
 | --- | --- |
 | `404 Not Found` | `thread_id` không tồn tại |
 | `409 Conflict` | Thread đang chạy, đang chờ HITL nhưng gọi `/chat`, chưa sẵn sàng, hoặc gọi resume khi không chờ HITL |
-| `422 Unprocessable Entity` | Body sai schema, thiếu/thừa `question_id`, sai `option_id`, lặp câu hỏi hoặc thiếu `custom_answer` cho `other` |
+| `422 Unprocessable Entity` | Body sai schema, form làm rõ không hợp lệ, hoặc guardrail chặn prompt injection với `detail.code=guardrail_blocked` |
 | SSE `error.code=configuration_error` | Thiếu/sai cấu hình dịch vụ; không nên retry nguyên request cho đến khi server được sửa |
 | SSE `error.code=service_error` | Lỗi runtime từ graph hoặc dịch vụ phụ thuộc; có thể retry |
 | SSE `error.code=incomplete_run` | Graph dừng mà không tạo form hoặc kết quả cuối; có thể retry |
@@ -461,5 +461,7 @@ Swagger UI phù hợp để kiểm tra schema và request. Tùy trình duyệt, 
 | `API_PORT` | `8000` | Port quy ước khi chạy server |
 | `API_CORS_ORIGINS` | localhost ports 3000, 5173 | Danh sách origin, phân cách bằng dấu phẩy |
 | `SSE_HEARTBEAT_SECONDS` | `15` | Chu kỳ heartbeat của stream |
+| `GUARDRAIL_MODE` | `enforce` | `enforce` chặn finding mức cao; `observe` chỉ ghi log để hiệu chỉnh pattern |
+| `GUARDRAIL_OUTPUT_HOLDBACK_CHARS` | `64` | Cửa sổ ký tự giữ lại để kiểm tra output trước khi phát SSE |
 
 Hiện chưa có authentication/authorization. Không expose API MVP trực tiếp ra Internet trước khi bổ sung auth, rate limiting và cấu hình CORS phù hợp.

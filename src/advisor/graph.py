@@ -6,6 +6,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from advisor.categories.registry import CategoryRegistry, build_default_registry
+from advisor.guardrails import GuardrailEngine
 from advisor.nodes import (
     AdvisorRuntime,
     analyze_turn_node,
@@ -29,23 +30,27 @@ if TYPE_CHECKING:
 
 
 def _route_turn(state: AdvisorState) -> str:
-    category = state.get("routing", {}).get("category")
-    if not category or not state.get("routing", {}).get("supported"):
-        return "placeholder"
     analysis = state.get("conversation", {}).get("analysis", {})
     action = analysis.get("action", TurnAction.DISCOVER.value)
     if action == TurnAction.CONVERSATION.value:
         return "conversation"
+    category = state.get("routing", {}).get("category")
+    if not category or not state.get("routing", {}).get("supported"):
+        return "placeholder"
     context = state.get("category_contexts", {}).get(category, {})
     recommendation = context.get("recommendation_context", {})
     has_recommendations = bool(recommendation.get("last_presented_ids"))
-    if action in {
-        TurnAction.PRODUCT_DETAIL.value,
-        TurnAction.COMPARE.value,
-        TurnAction.EXPLAIN.value,
-        TurnAction.MORE_OPTIONS.value,
-        TurnAction.SWITCH_CATEGORY.value,
-    } and has_recommendations:
+    if (
+        action
+        in {
+            TurnAction.PRODUCT_DETAIL.value,
+            TurnAction.COMPARE.value,
+            TurnAction.EXPLAIN.value,
+            TurnAction.MORE_OPTIONS.value,
+            TurnAction.SWITCH_CATEGORY.value,
+        }
+        and has_recommendations
+    ):
         return "plan"
     return "extract"
 
@@ -72,6 +77,7 @@ def build_graph(
     llm: Any | None = None,
     qdrant_client: Any | None = None,
     category_registry: CategoryRegistry | None = None,
+    guardrail_engine: GuardrailEngine | None = None,
 ) -> CompiledStateGraph:
     """Compile the graph without making network requests.
 
@@ -86,6 +92,7 @@ def build_graph(
         llm=llm,
         qdrant_client=qdrant_client,
         category_registry=category_registry or build_default_registry(),
+        guardrail_engine=guardrail_engine,
     )
     builder = StateGraph(AdvisorState)
     builder.add_node("prepare_turn", prepare_turn_node)

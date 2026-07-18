@@ -20,6 +20,12 @@ from pydantic import BaseModel, Field, model_validator
 
 from advisor.categories.registry import CategoryRegistry, build_default_registry
 from advisor.graph import build_graph
+from advisor.guardrails import (
+    GuardrailBlockedError,
+    GuardrailEngine,
+    SAFE_OUTPUT_FALLBACK,
+    StreamingOutputGuard,
+)
 from advisor.persistence.checkpointer import open_async_checkpointer
 from advisor.retrieval.qdrant import (
     AdvisorConfigurationError,
@@ -114,7 +120,9 @@ def _json_default(value: Any) -> Any:
 
 
 def encode_sse(event: str, data: dict[str, Any]) -> str:
-    payload = json.dumps(data, ensure_ascii=False, default=_json_default, separators=(",", ":"))
+    payload = json.dumps(
+        data, ensure_ascii=False, default=_json_default, separators=(",", ":")
+    )
     return f"event: {event}\ndata: {payload}\n\n"
 
 
@@ -266,6 +274,44 @@ def _validate_answers(values: dict[str, Any], submission: ResumeRequest) -> None
         )
 
 
+def _recent_human_text(values: dict[str, Any], *, limit: int = 12) -> list[str]:
+    history: list[str] = []
+    for message in (values.get("messages") or [])[-limit:]:
+        if getattr(message, "type", None) != "human":
+            continue
+        content = getattr(message, "content", "")
+        history.append(content if isinstance(content, str) else str(content))
+    return history
+
+
+def _enforce_request_guardrail(app: FastAPI, text: str, *, surface: str) -> None:
+    try:
+        app.state.guardrail_engine.enforce(text, surface=surface)
+    except GuardrailBlockedError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "guardrail_blocked",
+                "message": "Yêu cầu có nội dung không thể xử lý an toàn.",
+            },
+        ) from exc
+
+
+def _safe_public_result(
+    app: FastAPI, values: dict[str, Any]
+) -> tuple[str, list[dict[str, Any]]]:
+    answer = str((values.get("response") or {}).get("answer") or "")
+    products = list((values.get("ranking") or {}).get("selected_products") or [])
+    decision = app.state.guardrail_engine.inspect_value(
+        {"answer": answer, "selected_products": products},
+        surface="public_output",
+    )
+    app.state.guardrail_engine.record(decision, repr((answer, products)))
+    if app.state.guardrail_engine.should_block(decision):
+        return SAFE_OUTPUT_FALLBACK, []
+    return answer, products
+
+
 async def _stream_graph(
     *,
     request: Request,
@@ -279,10 +325,12 @@ async def _stream_graph(
     progress_emitted: set[str] = set()
     iterator: Any | None = None
     next_task: asyncio.Task[Any] | None = None
+    output_guard = StreamingOutputGuard(
+        app.state.guardrail_engine,
+        holdback_chars=app.state.settings.guardrail_output_holdback_chars,
+    )
     try:
-        yield encode_sse(
-            "session", {"thread_id": thread_id, "mode": session_mode}
-        )
+        yield encode_sse("session", {"thread_id": thread_id, "mode": session_mode})
         iterator = app.state.graph.astream(
             graph_input,
             config=_thread_config(thread_id),
@@ -308,12 +356,18 @@ async def _stream_graph(
             next_task = None
             part_type = part.get("type") if isinstance(part, dict) else None
             data = part.get("data") if isinstance(part, dict) else None
-            if part_type == "messages" and isinstance(data, (list, tuple)) and len(data) == 2:
+            if (
+                part_type == "messages"
+                and isinstance(data, (list, tuple))
+                and len(data) == 2
+            ):
                 chunk, metadata = data
                 if (metadata or {}).get("langgraph_node") == "compose_response":
                     delta = _message_chunk_text(chunk)
                     if delta:
-                        yield encode_sse("token", {"delta": delta})
+                        released = output_guard.feed(delta)
+                        if released:
+                            yield encode_sse("token", {"delta": released})
             elif part_type == "updates":
                 for stage in _find_progress_stages(data):
                     if stage not in progress_emitted:
@@ -333,6 +387,10 @@ async def _stream_graph(
                         },
                     )
 
+        trailing = output_guard.finish()
+        if trailing:
+            yield encode_sse("token", {"delta": trailing})
+
         if not terminal_emitted:
             snapshot = await _get_snapshot(app, thread_id)
             values = dict(snapshot.values)
@@ -350,14 +408,13 @@ async def _stream_graph(
                 )
             elif (values.get("control") or {}).get("stage") == "completed":
                 terminal_emitted = True
+                answer, selected_products = _safe_public_result(app, values)
                 yield encode_sse(
                     "completed",
                     {
                         "thread_id": thread_id,
-                        "answer": (values.get("response") or {}).get("answer", ""),
-                        "selected_products": (values.get("ranking") or {}).get(
-                            "selected_products", []
-                        ),
+                        "answer": answer,
+                        "selected_products": selected_products,
                     },
                 )
         if not terminal_emitted:
@@ -371,13 +428,24 @@ async def _stream_graph(
             )
     except asyncio.CancelledError:
         raise
+    except GuardrailBlockedError:
+        yield encode_sse(
+            "error",
+            {
+                "code": "guardrail_blocked",
+                "message": "Yêu cầu có nội dung không thể xử lý an toàn.",
+                "retryable": False,
+            },
+        )
     except Exception as exc:
         logger.exception("Chat stream failed for thread_id=%s", thread_id)
         configuration_error = isinstance(exc, AdvisorConfigurationError)
         yield encode_sse(
             "error",
             {
-                "code": "configuration_error" if configuration_error else "service_error",
+                "code": "configuration_error"
+                if configuration_error
+                else "service_error",
                 "message": (
                     "The advisor service is not configured correctly."
                     if configuration_error
@@ -421,6 +489,9 @@ def create_app(
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         application.state.settings = app_settings
         application.state.thread_registry = ThreadRunRegistry()
+        application.state.guardrail_engine = GuardrailEngine(
+            mode=app_settings.guardrail_mode
+        )
         application.state.ready = False
         if graph is not None:
             application.state.graph = graph
@@ -429,8 +500,10 @@ def create_app(
             application.state.ready = False
             return
 
-        if llm is None and not app_settings.google_api_key:
-            raise AdvisorConfigurationError("GOOGLE_API_KEY is required")
+        if llm is None and not (
+            app_settings.google_api_key or app_settings.fpt_api_key
+        ):
+            raise AdvisorConfigurationError("GOOGLE_API_KEY or FPT_API_KEY is required")
         client = qdrant_client or create_qdrant_client(app_settings)
         owns_client = qdrant_client is None
         resolved_registry = category_registry or build_default_registry()
@@ -464,6 +537,7 @@ def create_app(
                     llm=llm,
                     qdrant_client=client,
                     category_registry=resolved_registry,
+                    guardrail_engine=application.state.guardrail_engine,
                 )
                 application.state.ready = True
                 yield
@@ -503,17 +577,25 @@ def create_app(
         return {"status": "ok" if request.app.state.ready else "starting"}
 
     @application.get("/chat/{thread_id}", response_model=ThreadStatusResponse)
-    async def get_chat_status(thread_id: UUID, request: Request) -> ThreadStatusResponse:
+    async def get_chat_status(
+        thread_id: UUID, request: Request
+    ) -> ThreadStatusResponse:
         thread_key = str(thread_id)
         running = await request.app.state.thread_registry.is_running(thread_key)
         snapshot = await _get_snapshot(request.app, thread_key)
         if not running and not _snapshot_exists(snapshot):
             raise HTTPException(status_code=404, detail="Thread not found")
         values = dict(snapshot.values) if _snapshot_exists(snapshot) else {}
-        return _status_from_values(thread_id, values, running=running)
+        status = _status_from_values(thread_id, values, running=running)
+        if status.status == "completed":
+            answer, selected_products = _safe_public_result(request.app, values)
+            status.answer = answer
+            status.selected_products = selected_products
+        return status
 
     @application.post("/chat", responses=sse_response_docs)
     async def chat(payload: ChatRequest, request: Request) -> StreamingResponse:
+        _enforce_request_guardrail(request.app, payload.message, surface="chat_message")
         thread_uuid = payload.thread_id or uuid4()
         thread_key = str(thread_uuid)
         registry: ThreadRunRegistry = request.app.state.thread_registry
@@ -533,6 +615,11 @@ def create_app(
                     )
                 if (values.get("control") or {}).get("stage") != "completed":
                     raise HTTPException(status_code=409, detail="Thread is not ready")
+                _enforce_request_guardrail(
+                    request.app,
+                    "\n".join([*_recent_human_text(values), payload.message]),
+                    surface="conversation_input",
+                )
                 mode = "continued"
             return _streaming_response(
                 _stream_graph(
@@ -550,6 +637,17 @@ def create_app(
     async def resume_chat(
         thread_id: UUID, payload: ResumeRequest, request: Request
     ) -> StreamingResponse:
+        custom_answers = [
+            (answer.custom_answer or "").strip()
+            for answer in payload.answers
+            if answer.option_id == "other"
+        ]
+        if custom_answers:
+            _enforce_request_guardrail(
+                request.app,
+                "\n".join(custom_answers),
+                surface="clarification_custom_answer",
+            )
         thread_key = str(thread_id)
         registry: ThreadRunRegistry = request.app.state.thread_registry
         if not await registry.try_acquire(thread_key):
@@ -564,10 +662,18 @@ def create_app(
                     status_code=409,
                     detail="Thread is not waiting for clarification",
                 )
+            if custom_answers:
+                _enforce_request_guardrail(
+                    request.app,
+                    "\n".join([*_recent_human_text(values), *custom_answers]),
+                    surface="conversation_input",
+                )
             _validate_answers(values, payload)
             command = Command(
                 resume={
-                    "answers": [answer.model_dump(mode="json") for answer in payload.answers]
+                    "answers": [
+                        answer.model_dump(mode="json") for answer in payload.answers
+                    ]
                 }
             )
             return _streaming_response(

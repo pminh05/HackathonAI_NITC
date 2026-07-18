@@ -23,6 +23,7 @@ dependencies = [
     "pytest",
     "qdrant-client",
     "uvicorn[standard]",
+    "langsmith>=0.10.6",
 ]
 
 [tool.hatch.build.targets.wheel]
