@@ -120,4 +120,52 @@ def build_default_registry() -> CategoryRegistry:
             config_path=Path(__file__).with_name("washing_machine") / "config.yaml",
         )
     )
+    registry.register(
+        CategoryDefinition(
+            name="dryer",
+            display_name="Máy sấy quần áo",
+            package_path="advisor.categories.dryer",
+            config_path=Path(__file__).with_name("dryer") / "config.yaml",
+        )
+    )
+    registry.register(
+        CategoryDefinition(
+            name="dishwasher",
+            display_name="Máy rửa chén",
+            package_path="advisor.categories.dishwasher",
+            config_path=Path(__file__).with_name("dishwasher") / "config.yaml",
+        )
+    )
+    registry.register(
+        CategoryDefinition(
+            name="cooler_freezer",
+            display_name="Tủ mát, tủ đông",
+            package_path="advisor.categories.cooler_freezer",
+            config_path=Path(__file__).with_name("cooler_freezer") / "config.yaml",
+        )
+    )
+    registry.register(
+        CategoryDefinition(
+            name="water_heater",
+            display_name="Máy nước nóng",
+            package_path="advisor.categories.water_heater",
+            config_path=Path(__file__).with_name("water_heater") / "config.yaml",
+        )
+    )
+    registry.register(
+        CategoryDefinition(
+            name="tablet",
+            display_name="Máy tính bảng",
+            package_path="advisor.categories.tablet",
+            config_path=Path(__file__).with_name("tablet") / "config.yaml",
+        )
+    )
+    registry.register(
+        CategoryDefinition(
+            name="printer",
+            display_name="Máy in",
+            package_path="advisor.categories.printer",
+            config_path=Path(__file__).with_name("printer") / "config.yaml",
+        )
+    )
     return registry

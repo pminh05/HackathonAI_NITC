@@ -22,6 +22,12 @@ class ApplicationSettings(BaseSettings):
     log_level: str = "INFO"
     google_api_key: SecretStr | None = None
     gemini_model: str = "gemini-3.5-flash"
+    fpt_api_key: SecretStr | None = None
+    fpt_model: str = "Qwen3.6-27B"
+    fpt_base_url: str = "https://mkp-api.fptcloud.com"
+    fpt_enable_thinking: bool = False
+    fpt_timeout_seconds: float = Field(default=30.0, gt=0)
+    fpt_max_retries: int = Field(default=0, ge=0)
     qdrant_url: str | None = None
     qdrant_api_key: SecretStr | None = None
     qdrant_timeout_seconds: int = 60
@@ -31,10 +37,10 @@ class ApplicationSettings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     api_cors_origins: str = "http://localhost:3000,http://localhost:5173"
-    api_public_frontend_url: str | None = (
-        "https://hackathon-ai-nitc-eight.vercel.app"
-    )
+    api_public_frontend_url: str | None = "https://hackathon-ai-nitc-eight.vercel.app"
     sse_heartbeat_seconds: float = 15.0
+    guardrail_mode: Literal["enforce", "observe"] = "enforce"
+    guardrail_output_holdback_chars: int = Field(default=64, ge=64, le=256)
 
     model_config = SettingsConfigDict(
         env_file=("../.env", ".env"),
@@ -106,9 +112,7 @@ class TurnAnalysisResult(BaseModel):
     category_transition: CategoryTransition = CategoryTransition.INHERIT
     switch_evidence: str | None = None
     action: TurnAction = TurnAction.DISCOVER
-    scope: Literal["current_recommendations", "category", "unspecified"] = (
-        "unspecified"
-    )
+    scope: Literal["current_recommendations", "category", "unspecified"] = "unspecified"
     referenced_product_ids: list[str] = Field(default_factory=list, max_length=12)
     has_profile_update: bool = False
     direct_reply: str | None = None

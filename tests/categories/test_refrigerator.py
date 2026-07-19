@@ -493,14 +493,14 @@ def test_other_answer_is_interpreted_without_second_interrupt() -> None:
 
 
 def test_unimplemented_intent_returns_placeholder_without_qdrant() -> None:
-    llm = FakeLLM(intent=IntentLabel.DRYER)
+    llm = FakeLLM(intent=IntentLabel.KARAOKE_MICROPHONE)
     qdrant = FakeQdrant()
     graph = build_graph(llm=llm, qdrant_client=qdrant)
     result = graph.invoke(
-        {"messages": [HumanMessage(content="Tư vấn máy sấy quần áo")]},
+        {"messages": [HumanMessage(content="Tư vấn micro karaoke")]},
         {"configurable": {"thread_id": "placeholder"}},
     )
-    assert "hỗ trợ tư vấn tủ lạnh, máy lạnh và máy giặt" in result["response"]["answer"]
+    assert "máy rửa chén" in result["response"]["answer"]
     assert qdrant.query_kwargs is None
 
 
@@ -604,7 +604,7 @@ def test_follow_up_inherits_category_and_reuses_recommendations() -> None:
     ]
 
 
-def test_switching_category_and_returning_restores_refrigerator_context() -> None:
+def test_switching_to_unsupported_category_and_returning_restores_refrigerator_context() -> None:
     llm = FakeLLM(
         analyses=[
             TurnAnalysisResult(
@@ -614,9 +614,9 @@ def test_switching_category_and_returning_restores_refrigerator_context() -> Non
                 has_profile_update=True,
             ),
             TurnAnalysisResult(
-                category=IntentLabel.DRYER,
+                category=IntentLabel.KARAOKE_MICROPHONE,
                 category_transition="switch",
-                switch_evidence="máy sấy quần áo",
+                switch_evidence="micro karaoke",
                 action="switch_category",
             ),
             TurnAnalysisResult(
@@ -636,9 +636,9 @@ def test_switching_category_and_returning_restores_refrigerator_context() -> Non
     )
     first_profile = first["need_profile"]
     switched = graph.invoke(
-        {"messages": [HumanMessage(content="Chuyển qua máy sấy quần áo")]}, config
+        {"messages": [HumanMessage(content="Chuyển qua micro karaoke")]}, config
     )
-    assert switched["conversation"]["active_category"] == "dryer"
+    assert switched["conversation"]["active_category"] == "karaoke_microphone"
 
     restored = graph.invoke(
         {"messages": [HumanMessage(content="Quay lại tủ lạnh")]}, config

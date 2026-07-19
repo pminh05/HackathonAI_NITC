@@ -10,7 +10,43 @@ except ImportError:
 
 CATEGORY = "máy in"
 DATASET = "may_in"
-GROUPS = [["Công nghệ và chức năng in",["Loại máy","Công nghệ in","Chức năng","In hai mặt","In màu","Độ phân giải in"]],["Hiệu suất in",["Tốc độ in","Khổ giấy","Công suất in","Khay giấy"]],["Kết nối",["Kết nối","Wifi","Cổng giao tiếp","Hệ điều hành tương thích"]],["Thông số khác có trong nguồn",["Phạm vi sử dụng","Công nghệ làm lạnh","Loại Inverter","dien_tich_min_m2","dien_tich_max_m2","Điện năng tiêu thụ"]]]
+GROUPS = [
+    [
+        "Công nghệ và chất lượng in",
+        [
+            "Loại sản phẩm",
+            "Công nghệ",
+            "Chất lượng in (độ nét)",
+            "do_phan_giai_ngang_dpi",
+            "do_phan_giai_doc_dpi",
+            "Loại giấy in 2 mặt",
+        ],
+    ],
+    [
+        "Hiệu suất in",
+        [
+            "Tốc độ in",
+            "toc_do_in_trang_phut",
+            "toc_do_in_nhiet_mm_s",
+            "Công suất theo nghiệp vụ",
+            "cong_suat_thang_min_trang",
+            "cong_suat_thang_max_trang",
+            "Khay nạp giấy",
+        ],
+    ],
+    ["Kết nối và tương thích", ["Kết nối", "Cổng kết nối", "Tương thích"]],
+    [
+        "Giấy và vật tư",
+        [
+            "Khổ giấy",
+            "Kích thước phụ kiện",
+            "Loại giấy in",
+            "Loại mực in",
+            "so_trang_muc_min",
+            "so_trang_muc_max",
+        ],
+    ],
+]
 MAX_TOKENS = 480
 BASE_DIR = Path(__file__).resolve().parent
 IMAGE_PATH = "/public/may_in.jpg"
@@ -137,9 +173,10 @@ def main():
         seen_ids.add(sku)
 
         brand = clean(product.get("brand")) or "không xác định"
+        model = clean(product.get("model_code"))
         output.append({
             "id": sku,
-            "name": f"{CATEGORY} {brand} {sku}",
+            "name": f"{CATEGORY} {brand} {model or sku}",
             "text": create_semantic_text(product, sku),
             "image_path": IMAGE_PATH,
             "metadata": create_metadata(product, index),

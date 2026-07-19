@@ -1,0 +1,121 @@
+category: dryer
+display_name: Máy sấy quần áo
+collection: maysayquanao
+embedding_model: intfloat/multilingual-e5-small
+retrieval_limit: 12
+
+required_profile_fields:
+  - household_size
+  - budget
+  - usage_preferences
+
+payload_fields:
+  brand: metadata.brand
+  dryer_type: metadata.dryer_type
+  original_price: metadata.original_price_vnd
+  promotional_price: metadata.promotional_price_vnd
+  dry_capacity: metadata.dry_capacity_kg
+  people_min: metadata.people_min
+  people_max: metadata.people_max
+  inverter: metadata.has_inverter
+  sensor: metadata.has_sensor
+  power_max: metadata.power_max_w
+  width: metadata.width_cm
+  height: metadata.height_cm
+  depth: metadata.depth_cm
+
+payload_indexes:
+  metadata.brand: keyword
+  metadata.dryer_type: keyword
+  metadata.original_price_vnd: integer
+  metadata.promotional_price_vnd: integer
+  metadata.dry_capacity_kg: float
+  metadata.people_min: integer
+  metadata.people_max: integer
+  metadata.has_inverter: bool
+  metadata.has_sensor: bool
+  metadata.power_max_w: integer
+  metadata.width_cm: float
+  metadata.height_cm: float
+  metadata.depth_cm: float
+
+question_catalog:
+  household_size:
+    question_type: explicit
+    question: Gia đình bạn có bao nhiêu người thường xuyên sử dụng máy sấy?
+    options:
+      - option_id: one_two
+        label: 1–2 người
+        profile_updates: {household_size: 2}
+      - option_id: three_five
+        label: 3–5 người
+        profile_updates: {household_size: 5}
+      - option_id: six_seven
+        label: 6–7 người
+        profile_updates: {household_size: 7}
+      - option_id: over_seven
+        label: Trên 7 người
+        profile_updates: {household_size: 8}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  budget:
+    question_type: explicit
+    question: Ngân sách tối đa bạn dự kiến dành cho máy sấy là bao nhiêu?
+    options:
+      - option_id: under_10m
+        label: Dưới 10 triệu đồng
+        profile_updates: {budget_max_vnd: 10000000}
+      - option_id: 10m_15m
+        label: Khoảng 10–15 triệu đồng
+        profile_updates: {budget_max_vnd: 15000000}
+      - option_id: 15m_20m
+        label: Khoảng 15–20 triệu đồng
+        profile_updates: {budget_max_vnd: 20000000}
+      - option_id: over_20m
+        label: Trên 20 triệu đồng
+        profile_updates:
+          budget_segment: premium
+          soft_preferences: [premium]
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  usage_preferences:
+    question_type: implicit
+    question: Nhu cầu nào quan trọng nhất khi gia đình bạn sử dụng máy sấy?
+    options:
+      - option_id: rainy_season
+        label: Cần sấy ổn định trong mùa mưa hoặc thời tiết ẩm
+        profile_updates:
+          usage_preferences: [rainy_season]
+          implicit_needs: [reliable_drying, humidity_control]
+      - option_id: frequent_drying
+        label: Sấy quần áo thường xuyên, gần như hằng ngày
+        profile_updates:
+          usage_preferences: [frequent_drying]
+          soft_preferences: [durability, energy_saving]
+      - option_id: bulky_items
+        label: Thường sấy chăn mền hoặc đồ cồng kềnh
+        profile_updates:
+          usage_preferences: [bulky_items]
+          soft_preferences: [large_capacity]
+      - option_id: delicate_care
+        label: Ưu tiên chăm sóc đồ mỏng hoặc vải dễ hư
+        profile_updates:
+          usage_preferences: [delicate_care]
+          soft_preferences: [low_temperature, fabric_care]
+      - option_id: energy_saving
+        label: Ưu tiên tiết kiệm điện khi sử dụng lâu dài
+        profile_updates:
+          usage_preferences: [energy_saving]
+          soft_preferences: [energy_saving, heat_pump, inverter]
+      - option_id: quick_dry
+        label: Ưu tiên sấy nhanh và hạn chế nhăn
+        profile_updates:
+          usage_preferences: [quick_dry]
+          soft_preferences: [quick_dry, anti_wrinkle]
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}

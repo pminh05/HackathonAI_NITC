@@ -4,15 +4,23 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import re
+import threading
+import unicodedata
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from langchain_core.messages import AIMessage, HumanMessage
+import yaml
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableLambda
+from langchain_core.utils.json import parse_json_markdown
 from langgraph.types import interrupt
 from pydantic import BaseModel
 
 from advisor.categories.base import CategorySpec, deserialize_filter, serialize_filter
 from advisor.categories.registry import CategoryRegistry, build_default_registry
+from advisor.guardrails import GuardrailEngine, SAFE_OUTPUT_FALLBACK
 from advisor.retrieval.qdrant import (
     AdvisorConfigurationError,
     create_qdrant_client,
@@ -35,6 +43,10 @@ from advisor.state import AdvisorState, NodeUpdate
 
 if TYPE_CHECKING:
     from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_openai import ChatOpenAI
+
+
+logger = logging.getLogger(__name__)
 
 
 CATEGORY_SLUGS = {
@@ -54,6 +66,362 @@ CATEGORY_SLUGS = {
     IntentLabel.TABLET: "tablet",
 }
 SLUG_LABELS = {slug: label for label, slug in CATEGORY_SLUGS.items()}
+
+
+def _enum_value(value: Any, enum_type: type[Any], default: Any) -> str:
+    """Normalize common OpenAI-compatible enum aliases to canonical values."""
+    if isinstance(value, enum_type):
+        return value.value
+    text = str(value or "").strip()
+    folded = text.casefold()
+    for member in enum_type:
+        if folded in {member.value.casefold(), member.name.casefold()}:
+            return member.value
+    return default.value
+
+
+def _normalize_fpt_turn_analysis(value: Any) -> TurnAnalysisResult:
+    """Repair harmless Qwen aliases while preserving Pydantic validation."""
+    data = dict(value) if isinstance(value, dict) else {}
+    raw_category = str(data.get("category") or "").strip()
+    category = _enum_value(raw_category, IntentLabel, IntentLabel.OTHER)
+    category_folded = raw_category.casefold()
+    for label, slug in CATEGORY_SLUGS.items():
+        if category_folded == slug.casefold():
+            category = label.value
+            break
+
+    transition_aliases = {
+        "init": CategoryTransition.NEW.value,
+        "initial": CategoryTransition.NEW.value,
+        "none": CategoryTransition.INHERIT.value,
+        "": CategoryTransition.INHERIT.value,
+    }
+    raw_transition = str(data.get("category_transition") or "").strip()
+    transition = transition_aliases.get(
+        raw_transition.casefold(),
+        _enum_value(raw_transition, CategoryTransition, CategoryTransition.INHERIT),
+    )
+    action = _enum_value(data.get("action"), TurnAction, TurnAction.DISCOVER)
+    raw_scope = str(data.get("scope") or "").strip().casefold()
+    scope_aliases = {
+        "global": "unspecified",
+        "general": "unspecified",
+        "none": "unspecified",
+        "recommendation": "current_recommendations",
+        "recommendations": "current_recommendations",
+        "current": "current_recommendations",
+    }
+    scope = scope_aliases.get(raw_scope, raw_scope or "unspecified")
+    if scope not in {"current_recommendations", "category", "unspecified"}:
+        scope = "unspecified"
+
+    for nullable_field in ("switch_evidence", "direct_reply"):
+        raw = data.get(nullable_field)
+        if isinstance(raw, str) and raw.strip().casefold() in {"", "none", "null"}:
+            data[nullable_field] = None
+    referenced_ids = data.get("referenced_product_ids")
+    if not isinstance(referenced_ids, list):
+        referenced_ids = []
+
+    raw_profile_update = data.get("has_profile_update", False)
+    has_profile_update = (
+        raw_profile_update.strip().casefold() in {"true", "1", "yes"}
+        if isinstance(raw_profile_update, str)
+        else bool(raw_profile_update)
+    )
+
+    return TurnAnalysisResult.model_validate(
+        {
+            **data,
+            "category": category,
+            "category_transition": transition,
+            "action": action,
+            "scope": scope,
+            "referenced_product_ids": referenced_ids,
+            "has_profile_update": has_profile_update,
+        }
+    )
+
+
+def _markdown_mapping_to_yaml(text: str) -> str:
+    """Turn Qwen's bold Markdown field lists into a YAML mapping."""
+    lines: list[str] = []
+    field_pattern = re.compile(
+        r"^(\s*)[-*]\s+(?:\*\*)?([A-Za-z_][A-Za-z0-9_]*)(?:\*\*)?\s*:(.*)$"
+    )
+    bold_pattern = re.compile(
+        r"^(\s*)(?:\*\*)?([A-Za-z_][A-Za-z0-9_]*)(?:\*\*)\s*:(.*)$"
+    )
+    for line in text.splitlines():
+        match = field_pattern.match(line)
+        if match:
+            indent, key, remainder = match.groups()
+            # A leading bullet at column zero represents a top-level field.
+            # Indented bullets are preserved because they usually start a list item.
+            prefix = "" if not indent else f"{indent}- "
+            lines.append(f"{prefix}{key}:{remainder}")
+            continue
+        match = bold_pattern.match(line)
+        if match:
+            indent, key, remainder = match.groups()
+            lines.append(f"{indent}{key}:{remainder}")
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _parse_structured_text(text: str) -> dict[str, Any]:
+    """Parse JSON, fenced JSON, or Qwen's Markdown/YAML mapping output."""
+    try:
+        parsed = parse_json_markdown(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        parsed = yaml.safe_load(_markdown_mapping_to_yaml(text))
+    except yaml.YAMLError as exc:
+        raise ValueError("FPT structured output is not valid JSON or YAML") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("FPT structured output must be an object mapping")
+    return parsed
+
+
+def _raw_message_text(message: Any) -> str:
+    content = getattr(message, "content", message)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            block if isinstance(block, str) else str(block.get("text", ""))
+            for block in content
+            if isinstance(block, (str, dict))
+        )
+    return str(content)
+
+
+def _tool_call_arguments(message: Any) -> dict[str, Any] | None:
+    """Extract arguments from LangChain- or OpenAI-shaped tool calls."""
+    for tool_call in getattr(message, "tool_calls", None) or []:
+        args = tool_call.get("args") if isinstance(tool_call, dict) else None
+        if isinstance(args, dict):
+            return args
+        if isinstance(args, str):
+            try:
+                parsed = json.loads(args)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+
+    additional = getattr(message, "additional_kwargs", None) or {}
+    for tool_call in additional.get("tool_calls", []) or []:
+        function = tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
+        args = function.get("arguments")
+        if isinstance(args, dict):
+            return args
+        if isinstance(args, str):
+            try:
+                parsed = json.loads(args)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+    return None
+
+
+def _normalize_custom_answer(value: dict[str, Any]) -> dict[str, Any]:
+    """Normalize common status/confidence aliases without inventing user data."""
+    data = dict(value)
+    raw_status = str(
+        data.get("interpretation_status") or data.get("status") or ""
+    ).strip().casefold()
+    status_aliases = {
+        "understood": "mapped",
+        "matched": "mapped",
+        "resolved": "mapped",
+        "custom": "custom_value",
+        "free_text": "custom_value",
+        "partial": "partially_understood",
+        "partially understood": "partially_understood",
+        "unknown": "unresolved",
+        "not_understood": "unresolved",
+        "none": "unresolved",
+    }
+    if raw_status:
+        data["interpretation_status"] = status_aliases.get(raw_status, raw_status)
+
+    confidence = data.get("confidence")
+    if isinstance(confidence, str):
+        text = confidence.strip().rstrip("%")
+        try:
+            numeric = float(text)
+        except ValueError:
+            pass
+        else:
+            data["confidence"] = numeric / 100 if "%" in confidence else numeric
+    return data
+
+
+def _normalize_empty_collections(
+    value: dict[str, Any], schema: type[BaseModel]
+) -> dict[str, Any]:
+    """Repair only empty mapping/list mismatches that carry no information."""
+    data = dict(value)
+    for name, field_info in schema.model_fields.items():
+        if data.get(name) != {}:
+            continue
+        default = field_info.get_default(call_default_factory=True)
+        if isinstance(default, list):
+            data[name] = []
+    return data
+
+
+def _flatten_profile_values(
+    value: dict[str, Any], prefix: str = ""
+) -> dict[str, Any]:
+    flattened: dict[str, Any] = {}
+    for name, nested in value.items():
+        path = f"{prefix}.{name}" if prefix else name
+        if isinstance(nested, dict) and nested:
+            flattened.update(_flatten_profile_values(nested, path))
+        else:
+            flattened[path] = nested
+    return flattened
+
+
+def _normalize_profile_patch(value: dict[str, Any]) -> dict[str, Any]:
+    """Recover Qwen's occasional direct-profile response as patch operations."""
+    operation_names = {"set", "replace", "add", "remove", "clear"}
+    if operation_names.intersection(value):
+        return value
+
+    direct_values = {
+        name: item for name, item in value.items() if name != "evidence"
+    }
+    if not direct_values:
+        return value
+    flattened = _flatten_profile_values(direct_values)
+    scalar_values = {
+        path: item for path, item in flattened.items() if not isinstance(item, list)
+    }
+    list_values = {
+        path: item for path, item in flattened.items() if isinstance(item, list)
+    }
+    evidence = value.get("evidence")
+    return {
+        "set": scalar_values,
+        "replace": list_values,
+        "evidence": (
+            {
+                str(path): str(quote)
+                for path, quote in evidence.items()
+                if isinstance(quote, str)
+            }
+            if isinstance(evidence, dict)
+            else {}
+        ),
+    }
+
+
+def _parse_ranking_markdown(text: str) -> dict[str, Any] | None:
+    """Recover Qwen's numbered Reason/Trade-off ranking format."""
+    item_pattern = re.compile(
+        r"(?ims)^\s*\d+[.)]\s+(?:\*\*)?(?P<product_id>[A-Za-z0-9_.:/-]+)"
+        r"(?:\*\*)?[^\n]*\n"
+        r"\s*[-*]\s*\**(?:reason|lý do)\s*:\**\s*(?P<reason>[^\n]+)\n"
+        r"\s*[-*]\s*\**(?:trade[- _]?off|đánh đổi)\s*:\**\s*"
+        r"(?P<trade_off>[^\n]+)"
+    )
+    selected = [
+        {
+            "product_id": match.group("product_id").strip(),
+            "reason": match.group("reason").strip(),
+            "trade_off": match.group("trade_off").strip(),
+        }
+        for match in item_pattern.finditer(text)
+    ]
+    return {"selected_products": selected} if selected else None
+
+
+def _fpt_structured_output_contract(schema: type[BaseModel]) -> str:
+    """Make the output contract explicit for endpoints ignoring response_format."""
+    json_schema = json.dumps(
+        schema.model_json_schema(), ensure_ascii=False, separators=(",", ":")
+    )
+    return (
+        "YÊU CẦU ĐỊNH DẠNG BẮT BUỘC CHO ĐẦU RA: Chỉ trả đúng một JSON object "
+        "hợp lệ; không Markdown, không code fence, không văn xuôi trước hoặc sau. "
+        "Giữ chính xác tên field và enum trong JSON Schema; không đổi tên field "
+        "và không thêm field thay thế. JSON Schema:\n"
+        f"{json_schema}"
+    )
+
+
+def _add_fpt_structured_output_contract(
+    value: Any, schema: type[BaseModel]
+) -> list[BaseMessage]:
+    """Preserve chat input while adding a provider-specific system contract."""
+    contract = SystemMessage(content=_fpt_structured_output_contract(schema))
+    if isinstance(value, str):
+        return [contract, HumanMessage(content=value)]
+    if isinstance(value, BaseMessage):
+        return [contract, value]
+    if isinstance(value, (list, tuple)) and all(
+        isinstance(item, BaseMessage) for item in value
+    ):
+        messages = list(value)
+        # Keep the trusted guardrail system message first when present.
+        insert_at = 1 if messages and isinstance(messages[0], SystemMessage) else 0
+        messages.insert(insert_at, contract)
+        return messages
+    to_messages = getattr(value, "to_messages", None)
+    if callable(to_messages):
+        return _add_fpt_structured_output_contract(to_messages(), schema)
+    return [contract, HumanMessage(content=str(value))]
+
+
+def _validate_fpt_structured_value(
+    parsed: Any, schema: type[BaseModel]
+) -> BaseModel:
+    if isinstance(parsed, schema):
+        return parsed
+    if schema is TurnAnalysisResult:
+        return _normalize_fpt_turn_analysis(parsed)
+    if schema is RankingResult and isinstance(parsed, list):
+        parsed = {"selected_products": parsed}
+    if not isinstance(parsed, dict):
+        raise ValueError("FPT structured output must be an object mapping")
+    if schema is ProfilePatch:
+        parsed = _normalize_profile_patch(parsed)
+        operation_names = {"set", "replace", "add", "remove", "clear"}
+        if parsed and not operation_names.intersection(parsed):
+            raise ValueError("FPT ProfilePatch did not contain any patch operation")
+    if "interpretation_status" in schema.model_fields:
+        parsed = _normalize_custom_answer(parsed)
+    parsed = _normalize_empty_collections(parsed, schema)
+    return schema.model_validate(parsed)
+
+
+def _parse_fpt_structured_result(
+    result: Any, schema: type[BaseModel]
+) -> BaseModel:
+    """Recover FPT structured output before applying strict app validation."""
+    parsed = result.get("parsed") if isinstance(result, dict) else None
+    if parsed is None:
+        raw = result.get("raw") if isinstance(result, dict) else result
+        parsed = _tool_call_arguments(raw)
+        if parsed is None:
+            text = _raw_message_text(raw).strip()
+            try:
+                parsed = _parse_structured_text(text)
+            except ValueError:
+                parsed = _parse_ranking_markdown(text) if schema is RankingResult else None
+                if parsed is None:
+                    raise
+    return _validate_fpt_structured_value(parsed, schema)
 
 
 TURN_ANALYSIS_PROMPT = """Bạn điều phối một cuộc hội thoại tư vấn sản phẩm nhiều lượt.
@@ -87,12 +455,78 @@ tham chiếu. Quy tắc:
 """
 
 
+_CATEGORY_KEYWORDS = {
+    IntentLabel.REFRIGERATOR: ("tủ lạnh",),
+    IntentLabel.AIR_CONDITIONER: ("máy lạnh", "điều hòa"),
+    IntentLabel.WASHING_MACHINE: ("máy giặt",),
+    IntentLabel.DRYER: ("máy sấy", "máy sấy quần áo"),
+    IntentLabel.DISHWASHER: ("máy rửa chén", "máy rửa bát"),
+    IntentLabel.COOLER_FREEZER: ("tủ mát", "tủ đông"),
+    IntentLabel.WATER_HEATER: ("máy nước nóng", "bình nước nóng"),
+    IntentLabel.KARAOKE_MICROPHONE: ("micro karaoke",),
+    IntentLabel.PHONE_RECORDING_MICROPHONE: ("micro thu âm điện thoại",),
+    IntentLabel.SMARTWATCH: ("đồng hồ thông minh", "smartwatch"),
+    IntentLabel.DESKTOP: ("máy tính để bàn", "desktop"),
+    IntentLabel.MONITOR: ("màn hình máy tính", "monitor"),
+    IntentLabel.PRINTER: ("máy in",),
+    IntentLabel.TABLET: ("máy tính bảng", "tablet"),
+}
+
+
+def _searchable_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFD", value.casefold()).replace("đ", "d")
+    return "".join(
+        character
+        for character in normalized
+        if unicodedata.category(character) != "Mn"
+    )
+
+
+def _deterministic_turn_analysis(
+    query: str, current_active: str | None
+) -> TurnAnalysisResult:
+    """Keep routing alive when both structured providers reject their output."""
+    searchable_query = _searchable_text(query)
+    requested = IntentLabel.OTHER
+    for label, keywords in _CATEGORY_KEYWORDS.items():
+        if any(_searchable_text(keyword) in searchable_query for keyword in keywords):
+            requested = label
+            break
+
+    requested_slug = CATEGORY_SLUGS.get(requested)
+    if current_active and requested_slug and requested_slug != current_active:
+        transition = CategoryTransition.SWITCH
+        action = TurnAction.SWITCH_CATEGORY
+        switch_evidence = query
+    elif current_active:
+        transition = CategoryTransition.INHERIT
+        action = TurnAction.REFINE_NEEDS
+        switch_evidence = None
+        if requested is IntentLabel.OTHER:
+            requested = SLUG_LABELS.get(current_active, IntentLabel.OTHER)
+    else:
+        transition = CategoryTransition.NEW
+        action = TurnAction.DISCOVER
+        switch_evidence = None
+
+    return TurnAnalysisResult(
+        category=requested,
+        category_transition=transition,
+        switch_evidence=switch_evidence,
+        action=action,
+        scope="category" if requested is not IntentLabel.OTHER else "unspecified",
+        has_profile_update=True,
+    )
+
+
 def create_gemini_chat_model(settings: ApplicationSettings) -> ChatGoogleGenerativeAI:
     """Create the configured Gemini model with the lowest thinking level."""
     try:
         from langchain_google_genai import ChatGoogleGenerativeAI
     except ImportError as exc:
-        raise RuntimeError("Install project dependencies before creating Gemini.") from exc
+        raise RuntimeError(
+            "Install project dependencies before creating Gemini."
+        ) from exc
 
     if not settings.google_api_key:
         raise AdvisorConfigurationError("GOOGLE_API_KEY is required")
@@ -103,7 +537,293 @@ def create_gemini_chat_model(settings: ApplicationSettings) -> ChatGoogleGenerat
         include_thoughts=False,
         temperature=0,
         max_retries=2,
+        tags=["provider:google", "role:primary"],
+        metadata={"provider": "google", "model": settings.gemini_model},
     )
+
+
+def create_fpt_chat_model(settings: ApplicationSettings) -> ChatOpenAI:
+    """Create FPT AI Factory's OpenAI-compatible fallback chat model."""
+    try:
+        from langchain_openai import ChatOpenAI
+    except ImportError as exc:
+        raise RuntimeError(
+            "Install project dependencies before creating the FPT fallback."
+        ) from exc
+
+    if not settings.fpt_api_key:
+        raise AdvisorConfigurationError("FPT_API_KEY is required")
+    return ChatOpenAI(
+        model=settings.fpt_model,
+        api_key=settings.fpt_api_key.get_secret_value(),
+        base_url=settings.fpt_base_url,
+        temperature=0,
+        timeout=settings.fpt_timeout_seconds,
+        max_retries=settings.fpt_max_retries,
+        disable_streaming=True,
+        extra_body={
+            "chat_template_kwargs": {
+                "enable_thinking": settings.fpt_enable_thinking,
+            }
+        },
+        tags=["provider:fpt-ai-factory", "role:fallback"],
+        metadata={
+            "provider": "fpt-ai-factory",
+            "model": settings.fpt_model,
+            "thinking_enabled": settings.fpt_enable_thinking,
+        },
+    )
+
+
+def _provider_error_summary(exc: Exception) -> str:
+    return f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)[:300]}"
+
+
+def _is_nonretryable_primary_error(exc: Exception) -> bool:
+    current: BaseException | None = exc
+    while current is not None:
+        text = str(current).casefold()
+        if any(
+            marker in text
+            for marker in (
+                "api_key_invalid",
+                "api key not valid",
+                "invalid api key",
+                "permission_denied",
+                "authentication",
+            )
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+class ProviderFallbackError(RuntimeError):
+    """Expose a stable service error while retaining both provider failures."""
+
+    def __init__(self, primary: Exception | None, fallback: Exception) -> None:
+        self.primary = primary
+        self.fallback = fallback
+        super().__init__(
+            "All configured LLM providers failed; "
+            f"primary={type(primary).__name__ if primary else 'disabled'}, "
+            f"fallback={type(fallback).__name__}"
+        )
+
+
+@dataclass
+class ProviderFallbackRunnable:
+    """Run a configured primary/fallback pair through the shared circuit breaker."""
+
+    owner: "FallbackChatModel"
+    primary: Any | None
+    fallback: Any
+
+    def invoke(self, input: Any, config: Any | None = None, **kwargs: Any) -> Any:
+        return self.owner._invoke_pair(
+            self.primary,
+            self.fallback,
+            input,
+            config=config,
+            **kwargs,
+        )
+
+    async def ainvoke(
+        self, input: Any, config: Any | None = None, **kwargs: Any
+    ) -> Any:
+        return await self.owner._ainvoke_pair(
+            self.primary,
+            self.fallback,
+            input,
+            config=config,
+            **kwargs,
+        )
+
+
+@dataclass
+class FallbackChatModel:
+    """Preserve chat-model structured output while composing a fallback.
+
+    LangChain's ``with_fallbacks`` returns a generic Runnable, so applying it
+    directly to Gemini would hide ``with_structured_output``. This facade first
+    configures both providers and then composes the fallback. FPT's Marketplace
+    endpoint may ignore OpenAI ``response_format`` or emit fenced/Markdown JSON,
+    so every Pydantic schema goes through the same explicit output contract,
+    raw-envelope recovery, and final Pydantic validation.
+    """
+
+    primary: Any | None
+    fallback: Any
+    fallback_structured_method: str = "json_schema"
+    _primary_disabled: bool = field(default=False, init=False, repr=False)
+    _primary_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
+
+    def _primary_is_disabled(self) -> bool:
+        with self._primary_lock:
+            return self._primary_disabled
+
+    def _disable_primary(self, exc: Exception) -> None:
+        with self._primary_lock:
+            if self._primary_disabled:
+                return
+            self._primary_disabled = True
+        logger.error(
+            "Disabling primary LLM for this process after non-retryable error: %s",
+            _provider_error_summary(exc),
+        )
+
+    def _invoke_pair(
+        self,
+        primary: Any,
+        fallback: Any,
+        input: Any,
+        config: Any | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        primary_error: Exception | None = None
+        if primary is not None and not self._primary_is_disabled():
+            try:
+                return primary.invoke(input, config=config, **kwargs)
+            except Exception as exc:
+                primary_error = exc
+                if _is_nonretryable_primary_error(exc):
+                    self._disable_primary(exc)
+        try:
+            return fallback.invoke(input, config=config, **kwargs)
+        except Exception as fallback_error:
+            logger.error(
+                "LLM fallback failed; primary=%s fallback=%s",
+                (
+                    _provider_error_summary(primary_error)
+                    if primary_error
+                    else "disabled"
+                ),
+                _provider_error_summary(fallback_error),
+            )
+            raise ProviderFallbackError(
+                primary_error, fallback_error
+            ) from fallback_error
+
+    async def _ainvoke_pair(
+        self,
+        primary: Any,
+        fallback: Any,
+        input: Any,
+        config: Any | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        primary_error: Exception | None = None
+        if primary is not None and not self._primary_is_disabled():
+            try:
+                return await primary.ainvoke(input, config=config, **kwargs)
+            except Exception as exc:
+                primary_error = exc
+                if _is_nonretryable_primary_error(exc):
+                    self._disable_primary(exc)
+        try:
+            return await fallback.ainvoke(input, config=config, **kwargs)
+        except Exception as fallback_error:
+            logger.error(
+                "LLM fallback failed; primary=%s fallback=%s",
+                (
+                    _provider_error_summary(primary_error)
+                    if primary_error
+                    else "disabled"
+                ),
+                _provider_error_summary(fallback_error),
+            )
+            raise ProviderFallbackError(
+                primary_error, fallback_error
+            ) from fallback_error
+
+    def invoke(self, input: Any, config: Any | None = None, **kwargs: Any) -> Any:
+        return self._invoke_pair(
+            self.primary,
+            self.fallback,
+            input,
+            config=config,
+            **kwargs,
+        )
+
+    async def ainvoke(
+        self, input: Any, config: Any | None = None, **kwargs: Any
+    ) -> Any:
+        return await self._ainvoke_pair(
+            self.primary,
+            self.fallback,
+            input,
+            config=config,
+            **kwargs,
+        )
+
+    def with_structured_output(self, schema: type[Any], **kwargs: Any) -> Any:
+        primary = (
+            self.primary.with_structured_output(schema, **kwargs)
+            if self.primary is not None
+            else None
+        )
+        fallback_method = self.fallback_structured_method
+        fallback_kwargs = {
+            **kwargs,
+            "method": fallback_method,
+        }
+        if isinstance(schema, type) and issubclass(schema, BaseModel):
+            # Passing a Pydantic class makes the OpenAI SDK parse Qwen's raw
+            # response itself. That parser rejects occasional ```json fences.
+            # A JSON-schema dict selects LangChain's fence-tolerant parser; the
+            # final Runnable restores strict Pydantic validation afterwards.
+            fpt_structured = self.fallback.with_structured_output(
+                schema.model_json_schema(), include_raw=True, **fallback_kwargs
+            )
+
+            def invoke_fpt_structured(
+                input: Any, config: Any | None = None, **invoke_kwargs: Any
+            ) -> BaseModel:
+                result = fpt_structured.invoke(
+                    _add_fpt_structured_output_contract(input, schema),
+                    config=config,
+                    **invoke_kwargs,
+                )
+                return _parse_fpt_structured_result(result, schema)
+
+            async def ainvoke_fpt_structured(
+                input: Any, config: Any | None = None, **invoke_kwargs: Any
+            ) -> BaseModel:
+                result = await fpt_structured.ainvoke(
+                    _add_fpt_structured_output_contract(input, schema),
+                    config=config,
+                    **invoke_kwargs,
+                )
+                return _parse_fpt_structured_result(result, schema)
+
+            fallback = RunnableLambda(
+                invoke_fpt_structured,
+                afunc=ainvoke_fpt_structured,
+                name="fpt_structured_output_adapter",
+            )
+        else:
+            fallback = self.fallback.with_structured_output(schema, **fallback_kwargs)
+        return ProviderFallbackRunnable(self, primary, fallback)
+
+
+def create_advisor_chat_model(settings: ApplicationSettings) -> Any:
+    """Create Gemini, FPT-only, or Gemini with an FPT fallback."""
+    if settings.google_api_key:
+        primary = create_gemini_chat_model(settings)
+        if not settings.fpt_api_key:
+            return primary
+        return FallbackChatModel(
+            primary=primary,
+            fallback=create_fpt_chat_model(settings),
+        )
+    if settings.fpt_api_key:
+        return FallbackChatModel(
+            primary=None,
+            fallback=create_fpt_chat_model(settings),
+        )
+    raise AdvisorConfigurationError("GOOGLE_API_KEY or FPT_API_KEY is required")
 
 
 @dataclass
@@ -114,11 +834,17 @@ class AdvisorRuntime:
     llm: Any | None = None
     qdrant_client: Any | None = None
     category_registry: CategoryRegistry = field(default_factory=build_default_registry)
+    guardrail_engine: GuardrailEngine | None = None
     _qdrant_checked_categories: set[str] = field(default_factory=set)
+
+    def get_guardrail(self) -> GuardrailEngine:
+        if self.guardrail_engine is None:
+            self.guardrail_engine = GuardrailEngine(mode=self.settings.guardrail_mode)
+        return self.guardrail_engine
 
     def get_llm(self) -> Any:
         if self.llm is None:
-            self.llm = create_gemini_chat_model(self.settings)
+            self.llm = create_advisor_chat_model(self.settings)
         return self.llm
 
     def get_qdrant(self) -> Any:
@@ -128,6 +854,12 @@ class AdvisorRuntime:
 
     def structured(self, schema: type[Any]) -> Any:
         return self.get_llm().with_structured_output(schema, method="json_schema")
+
+    def guarded_prompt(self, prompt: str) -> Any:
+        return self.get_guardrail().prompt(prompt)
+
+    def validate_model_output(self, value: Any, *, surface: str) -> None:
+        self.get_guardrail().enforce_value(value, surface=surface)
 
     def get_category(self, name: str) -> CategorySpec:
         return self.category_registry.get_spec(name)
@@ -286,14 +1018,14 @@ def _get_category_context(state: AdvisorState, category: str) -> dict[str, Any]:
         )
         return context
     if category == "refrigerator" and any(
-        state.get(key) for key in ("need_profile", "retrieval", "ranking", "clarification")
+        state.get(key)
+        for key in ("need_profile", "retrieval", "ranking", "clarification")
     ):
         return {
             "profile": dict(state.get("need_profile") or {}),
             "profile_revision": 1 if state.get("need_profile") else 0,
             "clarification": dict(
-                state.get("clarification")
-                or _fresh_category_context()["clarification"]
+                state.get("clarification") or _fresh_category_context()["clarification"]
             ),
             "recommendation_context": _legacy_recommendation_context(state),
         }
@@ -385,29 +1117,68 @@ def prepare_turn_node(state: AdvisorState) -> NodeUpdate:
     return update
 
 
-def analyze_turn_node(state: AdvisorState, advisor_runtime: AdvisorRuntime) -> NodeUpdate:
+def analyze_turn_node(
+    state: AdvisorState, advisor_runtime: AdvisorRuntime
+) -> NodeUpdate:
     query = state["control"]["current_user_input"]
+    user_history = [
+        item["content"]
+        for item in _conversation_history(state)
+        if item["role"] == "user"
+    ]
+    advisor_runtime.get_guardrail().enforce(
+        "\n".join(user_history), surface="conversation_input"
+    )
     current_active = _active_category(state)
     current_context = (
         _get_category_context(state, current_active)
         if current_active
         else _fresh_category_context()
     )
-    prompt = TURN_ANALYSIS_PROMPT.format(
-        message=query,
-        active_category=current_active or "chưa có",
-        recommendation_aliases=json.dumps(
-            _recommendation_aliases(current_context), ensure_ascii=False
-        ),
-        pending_questions=json.dumps(
-            current_context.get("clarification", {}).get("questions", []),
-            ensure_ascii=False,
-        ),
-        conversation_history=json.dumps(
-            _conversation_history(state), ensure_ascii=False
-        ),
+    folded_query = query.casefold()
+    asks_supported_categories = "ngành hàng" in folded_query and any(
+        marker in folded_query for marker in ("nào", "gì", "hỗ trợ", "tư vấn")
     )
-    analysis = advisor_runtime.structured(TurnAnalysisResult).invoke(prompt)
+    if asks_supported_categories:
+        definitions = advisor_runtime.category_registry.all().values()
+        names = [
+            definition.display_name
+            for definition in definitions
+            if definition.implemented and definition.display_name
+        ]
+        category_list = ", ".join(names[:-1]) + f" và {names[-1]}"
+        analysis = TurnAnalysisResult(
+            category=IntentLabel.OTHER,
+            category_transition=CategoryTransition.INHERIT,
+            action=TurnAction.CONVERSATION,
+            scope="unspecified",
+            direct_reply=f"Hiện tại mình hỗ trợ tư vấn {category_list}.",
+        )
+    else:
+        prompt = TURN_ANALYSIS_PROMPT.format(
+            message=query,
+            active_category=current_active or "chưa có",
+            recommendation_aliases=json.dumps(
+                _recommendation_aliases(current_context), ensure_ascii=False
+            ),
+            pending_questions=json.dumps(
+                current_context.get("clarification", {}).get("questions", []),
+                ensure_ascii=False,
+            ),
+            conversation_history=json.dumps(
+                _conversation_history(state), ensure_ascii=False
+            ),
+        )
+        try:
+            analysis = advisor_runtime.structured(TurnAnalysisResult).invoke(
+                advisor_runtime.guarded_prompt(prompt)
+            )
+        except ProviderFallbackError:
+            logger.warning(
+                "Using deterministic turn routing after all LLM providers failed"
+            )
+            analysis = _deterministic_turn_analysis(query, current_active)
+    advisor_runtime.validate_model_output(analysis, surface="turn_analysis_output")
     requested_category = CATEGORY_SLUGS.get(analysis.category)
     evidence = (analysis.switch_evidence or "").strip()
     valid_switch = bool(
@@ -430,7 +1201,9 @@ def analyze_turn_node(state: AdvisorState, advisor_runtime: AdvisorRuntime) -> N
         transition = CategoryTransition.INHERIT
 
     contexts = dict(state.get("category_contexts") or {})
-    context = _get_category_context(state, active) if active else _fresh_category_context()
+    context = (
+        _get_category_context(state, active) if active else _fresh_category_context()
+    )
     if active and analysis.action is TurnAction.RESTART_CATEGORY:
         context = _fresh_category_context()
     if active:
@@ -519,7 +1292,9 @@ def _validated_patch_paths(paths: Any, valid_paths: frozenset[str]) -> list[str]
 
 
 def apply_profile_patch(
-    current: dict[str, Any], patch: ProfilePatch, category_spec: CategorySpec | None = None
+    current: dict[str, Any],
+    patch: ProfilePatch,
+    category_spec: CategorySpec | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Apply clear → set/replace → remove → add without additive corrections."""
     if category_spec is None:
@@ -597,17 +1372,26 @@ def extract_need_profile_node(
     context = _get_category_context(state, category)
     current = context.get("profile") or {}
     analysis = (state.get("conversation") or {}).get("analysis") or {}
-    extraction = advisor_runtime.structured(ProfilePatch).invoke(
-        spec.build_need_extraction_prompt(
-            state["control"]["current_user_input"],
-            current,
-            turn_action=analysis.get("action", TurnAction.DISCOVER.value),
-            pending_questions=(context.get("clarification") or {}).get(
-                "questions", []
-            ),
-            conversation_history=_conversation_history(state),
+    try:
+        extraction = advisor_runtime.structured(ProfilePatch).invoke(
+            advisor_runtime.guarded_prompt(
+                spec.build_need_extraction_prompt(
+                    state["control"]["current_user_input"],
+                    current,
+                    turn_action=analysis.get("action", TurnAction.DISCOVER.value),
+                    pending_questions=(context.get("clarification") or {}).get(
+                        "questions", []
+                    ),
+                    conversation_history=_conversation_history(state),
+                )
+            )
         )
-    )
+    except ProviderFallbackError:
+        logger.warning(
+            "Using an empty profile patch after all LLM providers failed"
+        )
+        extraction = ProfilePatch()
+    advisor_runtime.validate_model_output(extraction, surface="profile_patch_output")
     if isinstance(extraction, ProfilePatch):
         patch = extraction
         profile, changed_paths = apply_profile_patch(current, patch, spec)
@@ -618,9 +1402,7 @@ def extract_need_profile_node(
         changed_paths = [
             key for key, value in profile.items() if current.get(key) != value
         ]
-    resolved = set(
-        (context.get("clarification") or {}).get("resolved_fields", [])
-    )
+    resolved = set((context.get("clarification") or {}).get("resolved_fields", []))
     for question_id, paths in spec.question_profile_paths.items():
         if paths.intersection(changed_paths):
             resolved.discard(question_id)
@@ -762,29 +1544,58 @@ def _interpret_custom_answer(
     question_id: str,
     custom_answer: str,
 ) -> BaseModel:
-    catalog_question = spec.config["question_catalog"][
-        question_id
-    ]
-    return advisor_runtime.structured(spec.custom_answer_model).invoke(
-        spec.build_custom_answer_prompt(
+    advisor_runtime.get_guardrail().enforce(
+        custom_answer, surface="clarification_custom_answer"
+    )
+    catalog_question = spec.config["question_catalog"][question_id]
+    try:
+        result = advisor_runtime.structured(spec.custom_answer_model).invoke(
+            advisor_runtime.guarded_prompt(
+                spec.build_custom_answer_prompt(
+                    {
+                        "question": catalog_question["question"],
+                        "question_id": question_id,
+                        "available_options": [
+                            {
+                                "option_id": item["option_id"],
+                                "label": item["label"],
+                            }
+                            for item in catalog_question["options"]
+                            if item["option_id"] != "other"
+                        ],
+                        "custom_answer": custom_answer,
+                        "current_need_profile": profile,
+                    }
+                )
+            )
+        )
+    except ProviderFallbackError:
+        logger.warning(
+            "Marking a custom clarification answer unresolved after all LLM "
+            "providers failed"
+        )
+        result = spec.custom_answer_model.model_validate(
             {
-                "question": catalog_question["question"],
-                "question_id": question_id,
-                "available_options": [
-                    {"option_id": item["option_id"], "label": item["label"]}
-                    for item in catalog_question["options"]
-                    if item["option_id"] != "other"
-                ],
-                "custom_answer": custom_answer,
-                "current_need_profile": profile,
+                "interpretation_status": "unresolved",
+                "raw_answer": custom_answer,
+                "confidence": 0.0,
             }
         )
-    )
+    advisor_runtime.validate_model_output(result, surface="custom_answer_output")
+    return result
 
 
 def collect_clarification_node(
     state: AdvisorState, advisor_runtime: AdvisorRuntime
 ) -> NodeUpdate:
+    user_history = [
+        item["content"]
+        for item in _conversation_history(state)
+        if item["role"] == "user"
+    ]
+    advisor_runtime.get_guardrail().enforce(
+        "\n".join(user_history), surface="conversation_input"
+    )
     category = _active_category(state)
     if not category:
         raise ValueError("Clarification requires an active category")
@@ -820,15 +1631,21 @@ def collect_clarification_node(
             answer.question_id,
             answer.option_id,
         )
-        answer_labels.append(f"{answer.question_id}: {option.get('label', answer.option_id)}")
+        answer_labels.append(
+            f"{answer.question_id}: {option.get('label', answer.option_id)}"
+        )
         if answer.option_id != "other":
             updates = option.get("profile_updates") or {}
-            before = json.dumps(profile, ensure_ascii=False, sort_keys=True, default=str)
+            before = json.dumps(
+                profile, ensure_ascii=False, sort_keys=True, default=str
+            )
             profile = merge_need_profile(profile, updates, category=category)
             if before != json.dumps(
                 profile, ensure_ascii=False, sort_keys=True, default=str
             ):
-                changed_paths.extend(spec.question_profile_paths.get(answer.question_id, set()))
+                changed_paths.extend(
+                    spec.question_profile_paths.get(answer.question_id, set())
+                )
             continue
 
         custom_answer = (answer.custom_answer or "").strip()
@@ -841,8 +1658,12 @@ def collect_clarification_node(
         )
         before = json.dumps(profile, ensure_ascii=False, sort_keys=True, default=str)
         profile = merge_need_profile(profile, interpreted_updates, category=category)
-        if before != json.dumps(profile, ensure_ascii=False, sort_keys=True, default=str):
-            changed_paths.extend(spec.question_profile_paths.get(answer.question_id, set()))
+        if before != json.dumps(
+            profile, ensure_ascii=False, sort_keys=True, default=str
+        ):
+            changed_paths.extend(
+                spec.question_profile_paths.get(answer.question_id, set())
+            )
         custom_evidence[answer.question_id] = {
             "raw_answer": custom_answer,
             "status": interpretation.interpretation_status,
@@ -922,11 +1743,15 @@ def plan_execution_node(
         else:
             mode = ExecutionMode.RETRIEVE
             retrieval = {"exclude_product_ids": sorted(presented)}
-    elif action in {
-        TurnAction.PRODUCT_DETAIL.value,
-        TurnAction.COMPARE.value,
-        TurnAction.EXPLAIN.value,
-    } and last_ids:
+    elif (
+        action
+        in {
+            TurnAction.PRODUCT_DETAIL.value,
+            TurnAction.COMPARE.value,
+            TurnAction.EXPLAIN.value,
+        }
+        and last_ids
+    ):
         mode = ExecutionMode.REUSE
     elif not candidate_pool:
         mode = ExecutionMode.RETRIEVE
@@ -983,7 +1808,9 @@ def plan_execution_node(
     }
 
 
-def build_filter_node(state: AdvisorState, advisor_runtime: AdvisorRuntime) -> NodeUpdate:
+def build_filter_node(
+    state: AdvisorState, advisor_runtime: AdvisorRuntime
+) -> NodeUpdate:
     category = _active_category(state)
     if not category:
         raise ValueError("Filter construction requires an active category")
@@ -1008,9 +1835,10 @@ def _base_search_query(state: AdvisorState) -> str:
     recommendation = context.get("recommendation_context") or {}
     analysis = (state.get("conversation") or {}).get("analysis") or {}
     if analysis.get("action") == TurnAction.MORE_OPTIONS.value:
-        base_query = recommendation.get("discovery_query") or state["control"][
-            "current_user_input"
-        ]
+        base_query = (
+            recommendation.get("discovery_query")
+            or state["control"]["current_user_input"]
+        )
     else:
         base_query = state["control"]["current_user_input"]
     return str(base_query)
@@ -1039,11 +1867,20 @@ def retrieve_candidates_node(
         limit=limit,
         timeout=advisor_runtime.settings.qdrant_timeout_seconds,
     )
-    candidates = [
-        candidate
-        for candidate in (spec.normalize_candidate(point) for point in points)
-        if candidate["product_id"] not in exclude_ids
-    ][: int(config["retrieval_limit"])]
+    candidates: list[dict[str, Any]] = []
+    for point in points:
+        candidate = spec.normalize_candidate(point)
+        if candidate["product_id"] in exclude_ids:
+            continue
+        decision = advisor_runtime.get_guardrail().inspect_value(
+            candidate, surface="retrieved_candidate"
+        )
+        advisor_runtime.get_guardrail().record(decision, repr(candidate))
+        if advisor_runtime.get_guardrail().should_block(decision):
+            continue
+        candidates.append(candidate)
+        if len(candidates) >= int(config["retrieval_limit"]):
+            break
     return {
         "retrieval": {
             **state["retrieval"],
@@ -1053,6 +1890,24 @@ def retrieve_candidates_node(
         },
         "control": {**state["control"], "stage": "retrieval_completed"},
     }
+
+
+def _retrieval_order_ranking(candidates: list[dict[str, Any]]) -> RankingResult:
+    return RankingResult(
+        selected_products=[
+            {
+                "product_id": candidate["product_id"],
+                "reason": (
+                    "Sản phẩm nằm trong nhóm phù hợp nhất với nhu cầu và "
+                    "các bộ lọc đã cung cấp."
+                ),
+                "trade_off": (
+                    "Cần đối chiếu thêm các thông số chi tiết trước khi quyết định."
+                ),
+            }
+            for candidate in candidates[:3]
+        ]
+    )
 
 
 def rank_candidates_node(
@@ -1078,7 +1933,16 @@ def rank_candidates_node(
     allowed_ids = {candidate["product_id"] for candidate in candidates}
     result: RankingResult | None = None
     for attempt in range(2):
-        result = advisor_runtime.structured(RankingResult).invoke(prompt)
+        try:
+            result = advisor_runtime.structured(RankingResult).invoke(
+                advisor_runtime.guarded_prompt(prompt)
+            )
+        except ProviderFallbackError:
+            logger.warning(
+                "Using deterministic retrieval-order ranking after all LLM providers failed"
+            )
+            result = _retrieval_order_ranking(candidates)
+        advisor_runtime.validate_model_output(result, surface="ranking_output")
         selected_ids = {item.product_id for item in result.selected_products}
         if selected_ids and selected_ids <= allowed_ids:
             break
@@ -1090,7 +1954,10 @@ def rank_candidates_node(
     assert result is not None
     selected_ids = {item.product_id for item in result.selected_products}
     if not selected_ids or not selected_ids <= allowed_ids:
-        raise ValueError("Gemini selected product IDs outside the retrieved candidates")
+        logger.warning(
+            "Using deterministic retrieval-order ranking after invalid product IDs"
+        )
+        result = _retrieval_order_ranking(candidates)
     return {
         "ranking": {
             "selected_products": [
@@ -1145,14 +2012,20 @@ def _finalize_response(state: AdvisorState, answer: str) -> NodeUpdate:
 
     analysis = (state.get("conversation") or {}).get("analysis") or {}
     action = analysis.get("action")
-    selected_ids = [item["product_id"] for item in selected_public if item.get("product_id")]
-    if action in {
-        TurnAction.DISCOVER.value,
-        TurnAction.REFINE_NEEDS.value,
-        TurnAction.MORE_OPTIONS.value,
-        TurnAction.SWITCH_CATEGORY.value,
-        TurnAction.RESTART_CATEGORY.value,
-    } and selected_ids:
+    selected_ids = [
+        item["product_id"] for item in selected_public if item.get("product_id")
+    ]
+    if (
+        action
+        in {
+            TurnAction.DISCOVER.value,
+            TurnAction.REFINE_NEEDS.value,
+            TurnAction.MORE_OPTIONS.value,
+            TurnAction.SWITCH_CATEGORY.value,
+            TurnAction.RESTART_CATEGORY.value,
+        }
+        and selected_ids
+    ):
         recommendation["last_presented_ids"] = selected_ids
         recommendation["presented_ids"] = _merge_unique(
             recommendation.get("presented_ids") or [], selected_ids
@@ -1174,6 +2047,23 @@ def _finalize_response(state: AdvisorState, answer: str) -> NodeUpdate:
         "response": {"answer": answer},
         "control": {**state["control"], "stage": "completed"},
     }
+
+
+def _deterministic_advisory_response(
+    grounded_selection: list[dict[str, Any]],
+) -> str:
+    lines = ["Mình đã lọc được các lựa chọn sau từ dữ liệu sản phẩm hiện có:"]
+    for index, item in enumerate(grounded_selection, start=1):
+        product = item["product_data"]
+        name = product.get("name") or item["product_id"]
+        lines.append(
+            f"{index}. {name}: {item.get('reason', '')} "
+            f"Đánh đổi: {item.get('trade_off', '')}"
+        )
+    lines.append(
+        "Bạn có thể cho mình biết ưu tiên quan trọng nhất để mình thu hẹp thêm."
+    )
+    return "\n".join(lines)
 
 
 def compose_response_node(
@@ -1203,16 +2093,34 @@ def compose_response_node(
             "selected_products": grounded_selection,
         }
     )
-    llm_message = advisor_runtime.get_llm().invoke(prompt)
-    answer = _message_text(llm_message).strip()
+    try:
+        llm_message = advisor_runtime.get_llm().invoke(
+            advisor_runtime.guarded_prompt(prompt)
+        )
+        answer = _message_text(llm_message).strip()
+    except ProviderFallbackError:
+        logger.warning(
+            "Using deterministic advisory response after all LLM providers failed"
+        )
+        answer = _deterministic_advisory_response(grounded_selection)
     if not answer:
-        raise ValueError("Gemini returned an empty advisory response")
+        logger.warning("Using deterministic advisory response after empty LLM output")
+        answer = _deterministic_advisory_response(grounded_selection)
+    decision = advisor_runtime.get_guardrail().inspect(
+        answer, surface="advisory_output"
+    )
+    advisor_runtime.get_guardrail().record(decision, answer)
+    if advisor_runtime.get_guardrail().should_block(decision):
+        answer = SAFE_OUTPUT_FALLBACK
     return _finalize_response(state, answer)
 
 
 def conversation_response_node(state: AdvisorState) -> NodeUpdate:
     analysis = (state.get("conversation") or {}).get("analysis") or {}
-    answer = (analysis.get("direct_reply") or "Mình đang ở đây. Bạn muốn tìm hiểu thêm điều gì?").strip()
+    answer = (
+        analysis.get("direct_reply")
+        or "Mình đang ở đây. Bạn muốn tìm hiểu thêm điều gì?"
+    ).strip()
     return _finalize_response(state, answer)
 
 
@@ -1221,9 +2129,13 @@ def placeholder_response_node(state: AdvisorState) -> NodeUpdate:
     label = SLUG_LABELS.get(active) if active else None
     if label:
         answer = (
-            "Bản hiện tại hỗ trợ tư vấn tủ lạnh, máy lạnh và máy giặt; "
+            "Bản hiện tại hỗ trợ tư vấn tủ lạnh, máy lạnh, máy giặt, máy sấy "
+            "quần áo, máy rửa chén, tủ mát, tủ đông, máy nước nóng, máy tính "
+            "bảng và máy in; "
             f"ngành hàng {label.value} chưa được bật."
         )
     else:
-        answer = "Mình chưa nhận ra ngành hàng bạn cần. Bạn đang muốn tìm loại sản phẩm nào?"
+        answer = (
+            "Mình chưa nhận ra ngành hàng bạn cần. Bạn đang muốn tìm loại sản phẩm nào?"
+        )
     return _finalize_response(state, answer)

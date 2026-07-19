@@ -1,6 +1,20 @@
 {
   "dataset": "may_say_quan_ao",
   "category": "máy sấy quần áo",
+  "normalized_fields": {
+    "dryer_type": "keyword: heat_pump, condenser hoặc vented",
+    "original_price_vnd": "integer, đơn vị VND",
+    "promotional_price_vnd": "integer, đơn vị VND",
+    "dry_capacity_kg": "float, đơn vị kg",
+    "people_min": "integer",
+    "people_max": "integer hoặc thiếu với khoảng mở",
+    "width_cm": "float, đơn vị cm",
+    "height_cm": "float, đơn vị cm",
+    "depth_cm": "float, đơn vị cm",
+    "power_max_w": "integer, đơn vị W",
+    "has_inverter": "bool hoặc thiếu khi chưa xác định",
+    "has_sensor": "bool hoặc thiếu khi chưa xác định"
+  },
   "fields": {
     "Loại sản phẩm": {
       "description": "Các giá trị loại sản phẩm dùng để tìm kiếm, lọc và hiểu sản phẩm máy sấy quần áo.",
@@ -11,10 +25,41 @@
         "Sấy thông hơi"
       ]
     },
-    "Công nghệ sấy": {
-      "description": "Các giá trị công nghệ sấy dùng để tìm kiếm, lọc và hiểu sản phẩm máy sấy quần áo.",
+    "Công nghệ": {
+      "description": "Các giá trị công nghệ dùng để tìm kiếm, lọc và hiểu sản phẩm máy sấy quần áo.",
       "data_type": "string",
-      "possible_values": []
+      "possible_values": [
+        "Auto Dry tự động điều chỉnh nhiệt độ sấy phù hợp",
+        "ColourCare bảo vệ màu sắc quần áo",
+        "Công nghệ Allergy Care diệt khuẩn",
+        "Công nghệ LuxeCare (chăm sóc cao cấp dành cho đồ khô)",
+        "Công nghệ Steam & Wear làm mới quần áo",
+        "Công nghệ sấy diệt khuẩn Hygiene Care",
+        "Công nghệ sấy thông minh AI Dry",
+        "Công nghệ sấy thông minh Optimal Dry",
+        "Công nghệ Wrinkle Prevent chống nhăn",
+        "Cảm biến khối lượng quần áo",
+        "Cảm biến nhiệt độ lồng sấy",
+        "Cảm biến nhiệt độ quần áo",
+        "Cảm biến sấy Ultra",
+        "Cảm biến sấy đa chiều 3D",
+        "Cảm biến thông minh Smart Sensor",
+        "Cảm biến độ ẩm 3DSense điều chỉnh thời gian sấy",
+        "DelicateCare bảo vệ đồ len không bị biến dạng",
+        "Hygiene Care - dùng đèn tia cực tím khử khuẩn",
+        "ReverseTumbling sấy đảo chiều chống nhăn",
+        "Self Cleaning Condenser tự động làm sạch bộ trao đổi nhiệt",
+        "SenseDry giữ bền màu, bảo vệ sợi vải",
+        "SensiCare chăm sóc quần áo tránh bị hư tổn",
+        "Steam Care chăm sóc quần áo với hơi nước",
+        "Steam Refresh sấy hơi nước làm mới quần áo",
+        "Sấy kép Dual Hygiene Steam",
+        "Sấy Nanoe™ X diệt khuẩn",
+        "Sấy nhiệt AirWash khử mùi, diệt khuẩn",
+        "Sấy đa chiều xoắn ốc",
+        "Sấy đảo chiều",
+        "UV Sensitize khử khuẩn với đèn tia cực tím"
+      ]
     },
     "Động cơ": {
       "description": "Các giá trị động cơ dùng để tìm kiếm, lọc và hiểu sản phẩm máy sấy quần áo.",
@@ -26,11 +71,6 @@
         "Truyền động gián tiếp (Dây curoa)",
         "Truyền động trực tiếp"
       ]
-    },
-    "Chương trình": {
-      "description": "Các giá trị chương trình dùng để tìm kiếm, lọc và hiểu sản phẩm máy sấy quần áo.",
-      "data_type": "string",
-      "possible_values": []
     },
     "Công nghệ tiết kiệm điện": {
       "description": "Các giá trị công nghệ tiết kiệm điện dùng để tìm kiếm, lọc và hiểu sản phẩm máy sấy quần áo.",
