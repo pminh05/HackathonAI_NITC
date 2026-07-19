@@ -3,7 +3,7 @@
   "category": "đồng hồ thông minh",
   "fields": {
     "Màn hình hiển thị": {
-      "description": "Các giá trị màn hình hiển thị dùng để tìm kiếm, lọc và hiểu sản phẩm đồng hồ thông minh.",
+      "description": "Giá trị mô tả gốc cho màn hình hiển thị.",
       "data_type": "string",
       "possible_values": [
         "Active Matrix LCD with LED Backlight",
@@ -24,7 +24,7 @@
       ]
     },
     "Độ phân giải": {
-      "description": "Các giá trị độ phân giải dùng để tìm kiếm, lọc và hiểu sản phẩm đồng hồ thông minh.",
+      "description": "Giá trị mô tả gốc cho độ phân giải.",
       "data_type": "string",
       "possible_values": [
         "120 x 240 pixels",
@@ -97,7 +97,7 @@
       ]
     },
     "Chất liệu dây": {
-      "description": "Các giá trị chất liệu dây dùng để tìm kiếm, lọc và hiểu sản phẩm đồng hồ thông minh.",
+      "description": "Giá trị mô tả gốc cho chất liệu dây.",
       "data_type": "string",
       "possible_values": [
         "Cao su",
@@ -126,7 +126,7 @@
       ]
     },
     "Kết nối": {
-      "description": "Các giá trị kết nối dùng để tìm kiếm, lọc và hiểu sản phẩm đồng hồ thông minh.",
+      "description": "Giá trị mô tả gốc cho kết nối.",
       "data_type": "string",
       "possible_values": [
         "AGPS",
@@ -163,7 +163,7 @@
       ]
     },
     "Tương thích": {
-      "description": "Các giá trị tương thích dùng để tìm kiếm, lọc và hiểu sản phẩm đồng hồ thông minh.",
+      "description": "Giá trị mô tả gốc cho tương thích.",
       "data_type": "string",
       "possible_values": [
         "Android",
@@ -205,7 +205,7 @@
       ]
     },
     "Theo dõi sức khoẻ": {
-      "description": "Các giá trị theo dõi sức khoẻ dùng để tìm kiếm, lọc và hiểu sản phẩm đồng hồ thông minh.",
+      "description": "Giá trị mô tả gốc cho theo dõi sức khoẻ.",
       "data_type": "string",
       "possible_values": [
         "Bài tập thở",
@@ -297,7 +297,7 @@
       ]
     },
     "Chuẩn chống nước, bụi": {
-      "description": "Các giá trị chuẩn chống nước, bụi dùng để tìm kiếm, lọc và hiểu sản phẩm đồng hồ thông minh.",
+      "description": "Giá trị mô tả gốc cho chuẩn chống nước, bụi.",
       "data_type": "string",
       "possible_values": [
         "Chống nước 10 ATM (Bơi, lặn vùng nước nông)",
@@ -312,6 +312,193 @@
         "Kháng nước IP68 (Tắm, đi mưa)",
         "Kháng nước IPX8 (Rửa tay, đi mưa)"
       ]
+    },
+    "category_scope": {
+      "description": "Slug phạm vi collection, luôn là smartwatch.",
+      "data_type": "keyword",
+      "possible_values": [
+        "smartwatch"
+      ]
+    },
+    "brand_key": {
+      "description": "Tên hãng casefold dùng cho hard filter.",
+      "data_type": "keyword",
+      "possible_values": [
+        "abardeen",
+        "amazfit",
+        "apple",
+        "asus",
+        "befit",
+        "fitbit",
+        "garmin",
+        "haylou",
+        "honor",
+        "huawei",
+        "imoo",
+        "itel",
+        "kidcare",
+        "kieslect",
+        "masstel",
+        "mykid",
+        "oaxis myfirst fone",
+        "oppo",
+        "realme",
+        "samsung",
+        "sinophy",
+        "suunto",
+        "xiaomi",
+        "zeblaze",
+        "zobo",
+        "zwatch"
+      ]
+    },
+    "original_price_vnd": {
+      "description": "Giá gốc đã chuẩn hóa theo VND.",
+      "data_type": "integer",
+      "possible_values": []
+    },
+    "promotional_price_vnd": {
+      "description": "Giá khuyến mãi đã chuẩn hóa theo VND.",
+      "data_type": "integer",
+      "possible_values": []
+    },
+    "compatible_platforms": {
+      "description": "Nền tảng được nguồn xác nhận: ios/android.",
+      "data_type": "keyword[]",
+      "possible_values": [
+        "android",
+        "ios"
+      ]
+    },
+    "call_mode": {
+      "description": "Kiểu cuộc gọi: none, on_wrist hoặc standalone.",
+      "data_type": "keyword",
+      "possible_values": [
+        "on_wrist",
+        "standalone"
+      ]
+    },
+    "has_cellular": {
+      "description": "Nguồn SIM xác nhận có kết nối di động.",
+      "data_type": "bool",
+      "possible_values": []
+    },
+    "has_gps": {
+      "description": "Nguồn định vị xác nhận GPS/GNSS vệ tinh.",
+      "data_type": "bool",
+      "possible_values": []
+    },
+    "has_notifications": {
+      "description": "Nguồn xác nhận khả năng hiển thị thông báo.",
+      "data_type": "bool",
+      "possible_values": []
+    },
+    "swim_ready": {
+      "description": "Mô tả chống nước nói rõ dùng khi bơi hoặc lặn.",
+      "data_type": "bool",
+      "possible_values": []
+    },
+    "has_sos": {
+      "description": "Tiện ích nguồn ghi rõ SOS hoặc cuộc gọi khẩn cấp.",
+      "data_type": "bool",
+      "possible_values": []
+    },
+    "health_feature_tags": {
+      "description": "Tính năng sức khỏe có bằng chứng trực tiếp trong catalog.",
+      "data_type": "keyword[]",
+      "possible_values": [
+        "blood_pressure",
+        "body_composition",
+        "ecg",
+        "heart_rate",
+        "menstrual_cycle",
+        "sleep",
+        "spo2",
+        "step_count",
+        "stress",
+        "vo2_max"
+      ]
+    },
+    "display_family": {
+      "description": "Nhóm công nghệ màn hình chuẩn hóa.",
+      "data_type": "keyword",
+      "possible_values": [
+        "amoled_oled",
+        "ips_lcd",
+        "lcd",
+        "mip",
+        "other",
+        "tft_lcd"
+      ]
+    },
+    "strap_material_family": {
+      "description": "Nhóm chất liệu dây chuẩn hóa.",
+      "data_type": "keyword",
+      "possible_values": [
+        "composite",
+        "fabric_nylon",
+        "leather",
+        "metal",
+        "other",
+        "rubber_tpu",
+        "silicone",
+        "titanium"
+      ]
+    },
+    "screen_size_inch": {
+      "description": "Kích thước màn hình theo inch.",
+      "data_type": "float",
+      "possible_values": []
+    },
+    "case_length_mm": {
+      "description": "Chiều dài mặt đồng hồ theo mm.",
+      "data_type": "float",
+      "possible_values": []
+    },
+    "case_width_mm": {
+      "description": "Chiều rộng mặt đồng hồ theo mm.",
+      "data_type": "float",
+      "possible_values": []
+    },
+    "case_thickness_mm": {
+      "description": "Độ dày mặt đồng hồ theo mm.",
+      "data_type": "float",
+      "possible_values": []
+    },
+    "weight_g": {
+      "description": "Khối lượng theo gram.",
+      "data_type": "float",
+      "possible_values": []
+    },
+    "wrist_min_cm": {
+      "description": "Chu vi cổ tay nhỏ nhất theo cm.",
+      "data_type": "float",
+      "possible_values": []
+    },
+    "wrist_max_cm": {
+      "description": "Chu vi cổ tay lớn nhất theo cm.",
+      "data_type": "float",
+      "possible_values": []
+    },
+    "typical_battery_hours": {
+      "description": "Thời lượng chế độ thường/smartwatch; không dùng GPS hay tiết kiệm pin.",
+      "data_type": "float",
+      "possible_values": []
+    },
+    "battery_mah": {
+      "description": "Dung lượng pin theo mAh, không dùng để suy thời lượng.",
+      "data_type": "integer",
+      "possible_values": []
+    },
+    "charging_time_hours": {
+      "description": "Thời gian sạc được chuẩn hóa theo giờ.",
+      "data_type": "float",
+      "possible_values": []
+    },
+    "water_resistance_atm": {
+      "description": "Mức ATM được ghi trực tiếp trong nguồn.",
+      "data_type": "float",
+      "possible_values": []
     }
   }
 }

@@ -1,7 +1,8 @@
 # Product Advisor API
 
 Tài liệu này mô tả HTTP API tư vấn tủ lạnh, máy lạnh, máy giặt, máy sấy quần áo,
-máy rửa chén, tủ mát, tủ đông, máy nước nóng, máy tính bảng và máy in. API dùng
+máy rửa chén, tủ mát, tủ đông, máy nước nóng, micro karaoke, micro thu âm,
+đồng hồ thông minh, máy tính để bàn, máy tính bảng và máy in. API dùng
 FastAPI, lưu trạng thái hội thoại theo `thread_id` và trả kết quả chat bằng
 Server-Sent Events (SSE).
 
@@ -425,6 +426,14 @@ Catalog máy tính bảng hỗ trợ:
 | `budget` | `under_10m`, `10m_20m`, `20m_35m`, `over_35m`, `open`, `other` |
 | `connectivity` | `wifi_only`, `cellular_4g`, `cellular_5g`, `flexible`, `other` |
 
+Catalog máy tính để bàn hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `primary_usage` | `office_study`, `programming_multitasking`, `gaming`, `creative_content`, `engineering_workstation`, `general`, `other` |
+| `budget` | `under_15m`, `15m_30m`, `30m_50m`, `over_50m`, `open`, `other` |
+| `desktop_form` | `all_in_one`, `separate_unit`, `flexible`, `other` |
+
 Catalog máy in hỗ trợ:
 
 | `question_id` | Các `option_id` hợp lệ |
@@ -432,6 +441,43 @@ Catalog máy in hỗ trợ:
 | `print_purpose` | `mono_documents`, `color_documents`, `photo`, `receipt_label`, `general`, `other` |
 | `monthly_volume` | `light`, `regular`, `office`, `high`, `open`, `other` |
 | `budget` | `under_3m`, `3m_5m`, `5m_10m`, `over_10m`, `open`, `other` |
+
+Catalog micro karaoke hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `usage_context` | `home_family`, `karaoke_room`, `stage_event`, `portable`, `other` |
+| `connection_preference` | `wireless`, `wired`, `open`, `other` |
+| `budget` | `under_2m`, `2m_5m`, `5m_10m`, `over_10m`, `open`, `other` |
+
+Catalog micro thu âm hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `recording_setup` | `iphone_lightning`, `iphone_usb_c`, `android_usb_c`, `camera_3_5mm`, `computer_usb`, `open`, `other` |
+| `budget` | `under_1m`, `1m_3m`, `3m_5m`, `over_5m`, `open`, `other` |
+| `usage_preferences` | `solo_content`, `two_person_interview`, `outdoor_mobile`, `podcast_livestream`, `other` |
+
+Catalog đồng hồ thông minh hỗ trợ:
+
+| `question_id` | Các `option_id` hợp lệ |
+| --- | --- |
+| `primary_usage` | `health_monitoring`, `fitness_sports`, `outdoor_navigation`, `calls_notifications`, `children_safety`, `everyday_style`, `other` |
+| `budget` | `under_2m`, `2m_5m`, `5m_10m`, `10m_20m`, `over_20m`, `open`, `other` |
+| `phone_platform` | `ios`, `android`, `flexible`, `other` |
+
+Ngân sách được áp dụng khi người dùng chủ động nêu mức trần. Riêng catalog micro
+karaoke còn thiếu nhiều giá xác minh: mẫu có giá vượt trần bị loại, còn mẫu chưa
+có giá vẫn có thể được tư vấn nhưng response phải nêu rõ chưa thể xác nhận phù
+hợp ngân sách.
+
+Với catalog micro thu âm, một mức trần là hard constraint: sản phẩm thiếu giá
+xác minh không được coi là đạt trần đó.
+
+Catalog máy tính để bàn áp dụng cùng nguyên tắc ngân sách nghiêm ngặt. Nhu cầu
+gaming, thiết kế hoặc workstation chỉ ảnh hưởng semantic retrieval/ranking;
+GPU rời, RAM, storage hoặc CPU chỉ trở thành hard constraint khi người dùng nói
+rõ đó là yêu cầu bắt buộc.
 
 Client vẫn nên render theo `questions[].options` từ response thay vì phụ thuộc vào bảng này, vì catalog có thể thay đổi.
 

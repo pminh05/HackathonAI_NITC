@@ -1,69 +1,70 @@
 {
   "dataset": "micro_thu_am_dien_thoai",
-  "category": "micro thu âm điện thoại",
+  "category": "micro thu âm",
   "fields": {
-    "Loại sản phẩm": {
-      "description": "Các giá trị loại sản phẩm dùng để tìm kiếm, lọc và hiểu sản phẩm micro thu âm điện thoại.",
+    "product_type": {
+      "description": "Loại micro chuẩn hóa.",
       "data_type": "string",
       "possible_values": [
-        "Micro Podcast/Livestream",
-        "Micro thu âm không dây"
+        "podcast_livestream",
+        "wireless_recording"
       ]
     },
-    "Tính năng cơ bản": {
-      "description": "Các giá trị tính năng cơ bản dùng để tìm kiếm, lọc và hiểu sản phẩm micro thu âm điện thoại.",
+    "compatibility_tags": {
+      "description": "Thiết bị và hệ điều hành tương thích.",
       "data_type": "string",
       "possible_values": [
-        "Bit Depth/Sample Rate",
-        "Chạm để tắt tiếng (Tap-to-Mute)",
-        "Chống sốc tích hợp (Built-in Shock Mount)",
-        "Chống vỡ tiếng (Digital Gain Limiter)",
-        "Gắn từ tính",
-        "Intelligent Noise Cancelling",
-        "Lọc tiếng ồn",
-        "Màn hình cảm ứng kết hợp núm điều chỉnh",
-        "Ngắt micro tạm thời",
-        "Safety Track",
-        "Tự động kết nối",
-        "Đèn LED báo trạng thái",
-        "Đèn Led RGB",
-        "Đổi giọng nói"
+        "android",
+        "camera",
+        "ios",
+        "ipados",
+        "macos",
+        "playstation",
+        "windows"
       ]
     },
-    "Tương thích": {
-      "description": "Các giá trị tương thích dùng để tìm kiếm, lọc và hiểu sản phẩm micro thu âm điện thoại.",
+    "connector_tags": {
+      "description": "Cổng kết nối có bằng chứng trong catalog.",
       "data_type": "string",
       "possible_values": [
-        "Android",
-        "Camera",
-        "iOS (iPhone)",
-        "iPadOS",
-        "macOS",
-        "macOS Sequoia phiên bản 15",
-        "PlayStation 4/5",
-        "Windows"
+        "3_5mm",
+        "aux_in",
+        "lightning",
+        "micro_usb",
+        "usb_c",
+        "xlr"
       ]
     },
-    "Kết nối": {
-      "description": "Các giá trị kết nối dùng để tìm kiếm, lọc và hiểu sản phẩm micro thu âm điện thoại.",
+    "feature_tags": {
+      "description": "Tính năng micro đã được chuẩn hóa.",
       "data_type": "string",
       "possible_values": [
-        "Bluetooth"
+        "audio_settings",
+        "auto_connect",
+        "digital_gain_limiter",
+        "magnetic_mount",
+        "mute",
+        "noise_reduction",
+        "safety_track",
+        "shock_mount",
+        "status_light",
+        "touch_control",
+        "voice_change"
       ]
     },
-    "Cổng sạc": {
-      "description": "Các giá trị cổng sạc dùng để tìm kiếm, lọc và hiểu sản phẩm micro thu âm điện thoại.",
+    "pickup_pattern": {
+      "description": "Hướng hoặc kiểu thu âm.",
       "data_type": "string",
       "possible_values": [
-        "Type-C"
+        "omnidirectional",
+        "supercardioid"
       ]
     },
-    "Hướng thu âm": {
-      "description": "Các giá trị hướng thu âm dùng để tìm kiếm, lọc và hiểu sản phẩm micro thu âm điện thoại.",
+    "wireless_band": {
+      "description": "Băng tần không dây chuẩn hóa.",
       "data_type": "string",
       "possible_values": [
-        "Siêu hướng (Supercardioid) - Tập trung thu giọng nói phía trước, giảm thiểu tiếng ồn hai bên và phía sau",
-        "Đa hướng"
+        "2_4_ghz"
       ]
     }
   }

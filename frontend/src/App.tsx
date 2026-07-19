@@ -429,6 +429,13 @@ const starterSuggestions = [
   // "Tôi muốn biết về chính sách đổi trả",
   // "Tôi muốn biết về chính sách vận chuyển",
 ];
+const followUpSuggestions = [
+  // "Tôi muốn biết về chính sách bảo hành",
+  // "Tôi muốn biết về chính sách đổi trả",
+  // "Tôi muốn biết về chính sách vận chuyển",
+  "Tôi muốn biết thêm về sản phẩm",
+  "Tôi muốn biết thêm về giá cả",
+];
 function countWords(value: string): number {
   return value.trim().match(/\S+/g)?.length ?? 0;
 }
@@ -467,7 +474,10 @@ function suggestionConversation(
       .filter((value): value is string => Boolean(value))
       .join("; ");
     if (answerText)
-      messages.push({ role: "user", content: `Thông tin bổ sung: ${answerText}` });
+      messages.push({
+        role: "user",
+        content: `Thông tin bổ sung: ${answerText}`,
+      });
   }
 
   const selected: SuggestionConversationMessage[] = [];
@@ -479,7 +489,6 @@ function suggestionConversation(
   }
   return selected.reverse();
 }
-
 function limitWords(value: string, maximum: number): string {
   const matches = [...value.matchAll(/\S+/g)];
   if (matches.length <= maximum) return value;
@@ -543,9 +552,10 @@ function productImageSources(product: SelectedProduct): {
 
   const primary = resolveProductImageUrl(raw);
   const filename = raw.split(/[\\/]/).filter(Boolean).pop();
-  const fallback = /^(?:https?:|data:|blob:)/i.test(raw) || !filename
-    ? null
-    : `/${encodeURIComponent(filename)}`;
+  const fallback =
+    /^(?:https?:|data:|blob:)/i.test(raw) || !filename
+      ? null
+      : `/${encodeURIComponent(filename)}`;
   return { primary, fallback };
 }
 
@@ -585,7 +595,8 @@ function AiFeedbackCard({ product }: { product: SelectedProduct }) {
             onError={(event) => {
               if (
                 productImage.fallback &&
-                event.currentTarget.src !== new URL(productImage.fallback, window.location.href).href
+                event.currentTarget.src !==
+                  new URL(productImage.fallback, window.location.href).href
               ) {
                 event.currentTarget.src = productImage.fallback;
               } else {
@@ -594,7 +605,9 @@ function AiFeedbackCard({ product }: { product: SelectedProduct }) {
             }}
           />
         ) : (
-          <span className="mock-link-icon" aria-hidden="true">↗</span>
+          <span className="mock-link-icon" aria-hidden="true">
+            ↗
+          </span>
         )}
         <span>
           <small>Trang sản phẩm</small>
@@ -615,21 +628,30 @@ function AiFeedbackCard({ product }: { product: SelectedProduct }) {
         ) : (
           <form className="feedback-form" onSubmit={submitFeedback}>
             <div className="feedback-heading">
-              <span className="feedback-ai-icon" aria-hidden="true">✦</span>
+              <span className="feedback-ai-icon" aria-hidden="true">
+                ✦
+              </span>
               <div>
-                <h3 id="ai-feedback-title">Bạn hài lòng với tư vấn của AI không?</h3>
+                <h3 id="ai-feedback-title">
+                  Bạn hài lòng với tư vấn của AI không?
+                </h3>
                 <p>Phản hồi của bạn giúp trợ lý tư vấn tốt hơn.</p>
               </div>
             </div>
 
             <fieldset className="rating-fieldset">
               <legend>Mức độ hài lòng</legend>
-              <div className="star-rating" onMouseLeave={() => setHoveredRating(0)}>
+              <div
+                className="star-rating"
+                onMouseLeave={() => setHoveredRating(0)}
+              >
                 {[1, 2, 3, 4, 5].map((star) => (
                   <button
                     key={star}
                     type="button"
-                    className={star <= (hoveredRating || rating) ? "active" : ""}
+                    className={
+                      star <= (hoveredRating || rating) ? "active" : ""
+                    }
                     onMouseEnter={() => setHoveredRating(star)}
                     onFocus={() => setHoveredRating(star)}
                     onBlur={() => setHoveredRating(0)}
@@ -654,7 +676,11 @@ function AiFeedbackCard({ product }: { product: SelectedProduct }) {
               />
             </label>
 
-            <button className="feedback-submit" type="submit" disabled={rating === 0}>
+            <button
+              className="feedback-submit"
+              type="submit"
+              disabled={rating === 0}
+            >
               Gửi phản hồi
             </button>
           </form>
@@ -710,7 +736,8 @@ function ProductCard({
           onError={(event) => {
             if (
               productImage.fallback &&
-              event.currentTarget.src !== new URL(productImage.fallback, window.location.href).href
+              event.currentTarget.src !==
+                new URL(productImage.fallback, window.location.href).href
             ) {
               event.currentTarget.src = productImage.fallback;
             } else {
@@ -753,7 +780,9 @@ function ProductCard({
         <div className="product-review-hint">
           <span aria-hidden="true">↗</span>
           Xem trang sản phẩm
-          <span className="product-review-arrow" aria-hidden="true">→</span>
+          <span className="product-review-arrow" aria-hidden="true">
+            →
+          </span>
         </div>
       </div>
     </article>
@@ -1028,10 +1057,7 @@ export default function App() {
     );
     if (!target || target.suggestionsRequested) return;
     const conversation = suggestionConversation(state.items);
-    if (
-      conversation.length < 2 ||
-      conversation.at(-1)?.role !== "assistant"
-    )
+    if (conversation.length < 2 || conversation.at(-1)?.role !== "assistant")
       return;
 
     dispatch({ type: "REQUEST_SUGGESTIONS", id: target.id });
@@ -1405,13 +1431,14 @@ export default function App() {
                         product={feedbackTarget.product}
                       />
                     ) : null}
-                    {itemIndex === lastAssistantIndex &&
-                    canSend &&
-                    item.suggestions?.length ? (
+                    {itemIndex === lastAssistantIndex && canSend ? (
                       <div className="follow-up-block">
                         <span>Bạn có thể hỏi tiếp</span>
                         <div className="suggestion-list follow-up-suggestions">
-                          {item.suggestions.map((suggestion) => (
+                          {(item.suggestions?.length
+                            ? item.suggestions
+                            : followUpSuggestions
+                          ).map((suggestion) => (
                             <button
                               type="button"
                               key={suggestion}

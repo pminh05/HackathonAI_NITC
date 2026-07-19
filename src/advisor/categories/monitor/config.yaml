@@ -1,0 +1,147 @@
+category: monitor
+display_name: Màn hình máy tính
+collection: manhinhmaytinh
+embedding_model: intfloat/multilingual-e5-small
+retrieval_limit: 12
+
+required_profile_fields:
+  - primary_usage
+  - budget
+  - screen_size
+
+payload_fields:
+  category_scope: metadata.category_scope
+  brand: metadata.brand_key
+  original_price: metadata.original_price_vnd
+  promotional_price: metadata.promotional_price_vnd
+  screen_size: metadata.screen_size_inch
+  resolution_key: metadata.resolution_key
+  resolution_width: metadata.resolution_width_px
+  resolution_height: metadata.resolution_height_px
+  panel_family: metadata.panel_family
+  screen_shape: metadata.screen_shape
+  response_time: metadata.response_time_ms
+  response_metric: metadata.response_time_metric
+  brightness: metadata.brightness_nits
+  srgb_coverage: metadata.srgb_coverage_pct
+  dci_p3_coverage: metadata.dci_p3_coverage_pct
+  connections: metadata.connection_tags
+  features: metadata.feature_tags
+  speakers: metadata.has_speakers
+  vesa: metadata.has_vesa_mount
+  touch: metadata.has_touch
+  width: metadata.width_mm
+
+payload_indexes:
+  metadata.category_scope: keyword
+  metadata.brand_key: keyword
+  metadata.original_price_vnd: integer
+  metadata.promotional_price_vnd: integer
+  metadata.screen_size_inch: float
+  metadata.resolution_key: keyword
+  metadata.resolution_width_px: integer
+  metadata.resolution_height_px: integer
+  metadata.panel_family: keyword
+  metadata.screen_shape: keyword
+  metadata.response_time_ms: float
+  metadata.response_time_metric: keyword
+  metadata.brightness_nits: float
+  metadata.srgb_coverage_pct: float
+  metadata.dci_p3_coverage_pct: float
+  metadata.connection_tags: keyword
+  metadata.feature_tags: keyword
+  metadata.has_speakers: bool
+  metadata.has_vesa_mount: bool
+  metadata.has_touch: bool
+  metadata.width_mm: float
+
+question_catalog:
+  primary_usage:
+    question_type: explicit
+    question: Bạn chủ yếu dùng màn hình máy tính cho nhu cầu nào?
+    options:
+      - option_id: office_study
+        label: Văn phòng và học tập
+        profile_updates:
+          usage_preferences: [office_study]
+          soft_preferences: [eye_care, ergonomic_stand, energy_saving]
+      - option_id: programming_multitasking
+        label: Lập trình và đa nhiệm
+        profile_updates:
+          usage_preferences: [programming_multitasking]
+          soft_preferences: [high_resolution, large_workspace, ergonomic_stand]
+      - option_id: gaming
+        label: Chơi game
+        profile_updates:
+          usage_preferences: [gaming]
+          soft_preferences: [high_refresh_rate, low_response_time, adaptive_sync]
+      - option_id: creative_color
+        label: Thiết kế và chỉnh sửa hình ảnh
+        profile_updates:
+          usage_preferences: [creative_color]
+          soft_preferences: [high_resolution, wide_color_gamut, color_accuracy]
+      - option_id: entertainment
+        label: Giải trí và xem phim
+        profile_updates:
+          usage_preferences: [entertainment]
+          soft_preferences: [large_screen, hdr, built_in_speakers]
+      - option_id: general
+        label: Dùng đa mục đích
+        profile_updates: {usage_preferences: [general]}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  budget:
+    question_type: explicit
+    question: Ngân sách tối đa bạn dự kiến dành cho màn hình là bao nhiêu?
+    options:
+      - option_id: under_3m
+        label: Tối đa 3 triệu đồng
+        profile_updates: {budget_max_vnd: 3000000}
+      - option_id: 3m_6m
+        label: Khoảng 3–6 triệu đồng
+        profile_updates: {budget_max_vnd: 6000000}
+      - option_id: 6m_12m
+        label: Khoảng 6–12 triệu đồng
+        profile_updates: {budget_max_vnd: 12000000}
+      - option_id: over_12m
+        label: Trên 12 triệu đồng
+        profile_updates:
+          budget_segment: premium
+          soft_preferences: [premium]
+      - option_id: open
+        label: Chưa chốt ngân sách
+        profile_updates: {budget_segment: open}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  screen_size:
+    question_type: explicit
+    question: Bạn ưu tiên màn hình có kích thước nào?
+    options:
+      - option_id: compact
+        label: Nhỏ gọn, tối đa 24 inch
+        profile_updates:
+          screen_size_preference: compact
+          soft_preferences: [compact_screen]
+      - option_id: standard
+        label: Khoảng 24–27 inch
+        profile_updates: {screen_size_preference: standard}
+      - option_id: large
+        label: Khoảng 27–32 inch
+        profile_updates:
+          screen_size_preference: large
+          soft_preferences: [large_screen]
+      - option_id: ultrawide
+        label: Ultrawide hoặc từ 34 inch
+        profile_updates:
+          screen_size_preference: ultrawide
+          soft_preferences: [ultrawide, large_workspace]
+      - option_id: flexible
+        label: Kích thước nào cũng được
+        profile_updates: {screen_size_preference: flexible}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}

@@ -1,0 +1,97 @@
+category: karaoke_microphone
+display_name: Micro karaoke
+collection: microkaraoke
+embedding_model: intfloat/multilingual-e5-small
+retrieval_limit: 12
+
+required_profile_fields:
+  - usage_context
+  - connection_preference
+  - budget
+
+payload_fields:
+  category_scope: metadata.category_scope
+  brand_key: metadata.brand_key
+  original_price: metadata.original_price_vnd
+  promotional_price: metadata.promotional_price_vnd
+  microphone_type: metadata.microphone_type
+  wireless_band: metadata.wireless_band
+
+payload_indexes:
+  metadata.category_scope: keyword
+  metadata.brand_key: keyword
+  metadata.original_price_vnd: integer
+  metadata.promotional_price_vnd: integer
+  metadata.microphone_type: keyword
+  metadata.wireless_band: keyword
+
+question_catalog:
+  usage_context:
+    question_type: implicit
+    question: Bạn chủ yếu dùng micro karaoke trong tình huống nào?
+    options:
+      - option_id: home_family
+        label: Hát karaoke gia đình
+        profile_updates:
+          usage_preferences: [home_family]
+          implicit_needs: [easy_setup, vocal_clarity]
+      - option_id: karaoke_room
+        label: Phòng karaoke cố định
+        profile_updates:
+          usage_preferences: [karaoke_room]
+          implicit_needs: [stable_signal, vocal_clarity]
+      - option_id: stage_event
+        label: Sân khấu hoặc sự kiện
+        profile_updates:
+          usage_preferences: [stage_event]
+          implicit_needs: [stable_signal, low_distortion]
+      - option_id: portable
+        label: Thường xuyên mang theo
+        profile_updates:
+          usage_preferences: [portable]
+          implicit_needs: [easy_setup, portability]
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  connection_preference:
+    question_type: explicit
+    question: Bạn cần micro có dây hay không dây?
+    options:
+      - option_id: wireless
+        label: Micro không dây
+        profile_updates: {connection_preference: wireless}
+      - option_id: wired
+        label: Micro có dây
+        profile_updates: {connection_preference: wired}
+      - option_id: open
+        label: Chưa ưu tiên loại nào
+        profile_updates: {connection_preference: open}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  budget:
+    question_type: explicit
+    question: Ngân sách tối đa bạn dự kiến dành cho micro karaoke là bao nhiêu?
+    options:
+      - option_id: under_2m
+        label: Tối đa 2 triệu đồng
+        profile_updates: {budget_max_vnd: 2000000}
+      - option_id: 2m_5m
+        label: Khoảng 2–5 triệu đồng
+        profile_updates: {budget_max_vnd: 5000000}
+      - option_id: 5m_10m
+        label: Khoảng 5–10 triệu đồng
+        profile_updates: {budget_max_vnd: 10000000}
+      - option_id: over_10m
+        label: Trên 10 triệu đồng
+        profile_updates:
+          budget_segment: premium
+          soft_preferences: [premium]
+      - option_id: open
+        label: Chưa chốt ngân sách
+        profile_updates: {budget_segment: open}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}

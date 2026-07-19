@@ -15,8 +15,17 @@ from advisor.categories.air_conditioner import (
 from advisor.categories.cooler_freezer import load_config as load_cooler_freezer_config
 from advisor.categories.dryer import load_config as load_dryer_config
 from advisor.categories.dishwasher import load_config as load_dishwasher_config
+from advisor.categories.desktop import load_config as load_desktop_config
+from advisor.categories.karaoke_microphone import (
+    load_config as load_karaoke_microphone_config,
+)
+from advisor.categories.monitor import load_config as load_monitor_config
+from advisor.categories.phone_recording_microphone import (
+    load_config as load_phone_recording_microphone_config,
+)
 from advisor.categories.printer import load_config as load_printer_config
 from advisor.categories.refrigerator import load_config
+from advisor.categories.smartwatch import load_config as load_smartwatch_config
 from advisor.categories.tablet import load_config as load_tablet_config
 from advisor.categories.water_heater import load_config as load_water_heater_config
 from advisor.categories.washing_machine import (
@@ -106,6 +115,11 @@ class FakeQdrant:
                 load_dishwasher_config(),
                 load_cooler_freezer_config(),
                 load_water_heater_config(),
+                load_karaoke_microphone_config(),
+                load_phone_recording_microphone_config(),
+                load_smartwatch_config(),
+                load_desktop_config(),
+                load_monitor_config(),
                 load_tablet_config(),
                 load_printer_config(),
             )
