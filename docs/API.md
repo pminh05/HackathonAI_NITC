@@ -7,6 +7,9 @@ FastAPI, lưu trạng thái hội thoại theo `thread_id` và trả kết quả
 Server-Sent Events (SSE). Người dùng đã đăng nhập được định danh bằng Supabase
 access token và có long-term memory riêng trên Mem0.
 
+Kiến trúc, chính sách dữ liệu và luồng vận hành Mem0 được giải thích riêng tại
+[MEM0.md](MEM0.md).
+
 ## 1. Chạy dịch vụ
 
 Yêu cầu các biến `GOOGLE_API_KEY`, `QDRANT_URL` và `QDRANT_API_KEY` đã được cấu hình trong `.env`.
@@ -607,5 +610,16 @@ Swagger UI phù hợp để kiểm tra schema và request. Tùy trình duyệt, 
 | `SSE_HEARTBEAT_SECONDS` | `15` | Chu kỳ heartbeat của stream |
 | `GUARDRAIL_MODE` | `enforce` | `enforce` chặn finding mức cao; `observe` chỉ ghi log để hiệu chỉnh pattern |
 | `GUARDRAIL_OUTPUT_HOLDBACK_CHARS` | `64` | Cửa sổ ký tự giữ lại để kiểm tra output trước khi phát SSE |
+| `MEMORY_ENABLED` | `false` | Bật recall và write-back Mem0 cho người dùng đã đăng nhập |
+| `MEM0_API_KEY` | Không có | API key Mem0 chỉ dùng ở backend |
+| `MEM0_BASE_URL` | `https://api.mem0.ai` | Base URL của Mem0 Platform |
+| `MEM0_SEARCH_TOP_K` | `10` | Số fact tối đa yêu cầu từ semantic search |
+| `MEM0_SEARCH_THRESHOLD` | `0.2` | Ngưỡng điểm tối thiểu khi recall |
+| `MEM0_SEARCH_TIMEOUT_SECONDS` | `3` | Timeout cho search và queue write Mem0 |
+| `SUPABASE_URL` | Không có | URL project dùng để xác minh access token |
+| `SUPABASE_PUBLISHABLE_KEY` | Không có | Supabase publishable key |
+| `SUPABASE_AUTH_TIMEOUT_SECONDS` | `5` | Timeout xác minh Supabase access token |
 
-Hiện chưa có authentication/authorization. Không expose API MVP trực tiếp ra Internet trước khi bổ sung auth, rate limiting và cấu hình CORS phù hợp.
+API đã xác thực bearer token qua Supabase và kiểm tra ownership cho thread/memory.
+Trước khi expose ra Internet vẫn cần cấu hình CORS chặt chẽ, rate limiting,
+TLS, secret management và monitoring phù hợp với môi trường triển khai.

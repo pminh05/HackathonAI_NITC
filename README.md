@@ -8,7 +8,10 @@ Phiên bản hiện tại triển khai đầy đủ cho **tủ lạnh**, **máy 
 **máy tính để bàn**, **máy tính bảng** và **máy in**, sau đó có thể mở rộng sang
 các sheet sản phẩm khác qua `CategorySpec`.
 
-Tài liệu HTTP API, SSE và Human-in-the-loop: [docs/API.md](docs/API.md).
+Tài liệu chi tiết:
+
+- HTTP API, SSE và Human-in-the-loop: [docs/API.md](docs/API.md).
+- Kiến trúc, luồng đọc/ghi và vận hành Mem0: [docs/MEM0.md](docs/MEM0.md).
 
 ## Yêu cầu hệ thống
 
@@ -139,6 +142,13 @@ SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 
 `MEM0_API_KEY` chỉ đặt ở backend. Khi `MEMORY_ENABLED=false`, người dùng ẩn danh
 và toàn bộ luồng cũ tiếp tục hoạt động mà không gọi Mem0.
+
+Mem0 chỉ hoạt động với request có Supabase access token hợp lệ. Backend dùng UUID
+người dùng do Supabase xác minh làm `user_id`, vì vậy client không được tự gửi
+`user_id`. Memory về tên gọi và phong cách trả lời có thể được dùng trực tiếp;
+memory có thể thay đổi bộ lọc hoặc xếp hạng sẽ hiện thẻ xác nhận `use`, `edit` hoặc
+`ignore` trước khi được đưa vào hồ sơ nhu cầu. Xem [docs/MEM0.md](docs/MEM0.md)
+để biết đầy đủ luồng recall, projection, HITL, write-back và các giới hạn hiện tại.
 
 Backend uses SQLite checkpoints by default. For a deployed Supabase/PostgreSQL
 backend, configure the Session pooler connection string instead:
@@ -364,6 +374,12 @@ mỗi category/thread. Tên gọi và phong cách trả lời có thể dùng tr
 ưu tiên là thông tin ở lượt hiện tại, profile đã xác nhận trong thread, gợi ý Mem0
 chưa xác nhận, rồi giá trị mặc định. Ngân sách và hard constraint chỉ được dùng lại
 khi memory có đúng ngành hàng.
+
+Luồng Mem0 được thiết kế fail-open: search hoặc ghi memory lỗi sẽ được log nhưng
+không chặn câu trả lời tư vấn. Sau event `completed`, client có thể kiểm tra tác vụ
+ghi bất đồng bộ qua `GET /chat/{thread_id}/memory-write`; người dùng có thể xem và
+xóa dữ liệu của mình qua nhóm endpoint `/me/memories`. Chi tiết payload, category
+memory, chính sách an toàn và hướng mở rộng nằm trong [docs/MEM0.md](docs/MEM0.md).
 
 ## Qdrant collections
 
