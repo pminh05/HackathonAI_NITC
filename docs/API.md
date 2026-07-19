@@ -35,8 +35,12 @@ POST /chat
                                       ▼
                          POST /chat/{thread_id}/resume
                               với toàn bộ quick options
-                                      │
-                                      └── token* ──> completed
+                              │
+                              └── token* ──> completed
+
+Sau mỗi event `completed`, frontend có thể chạy độc lập:
+
+POST /suggestions ──> suggestions_started ──> suggestions
 ```
 
 Quy tắc quan trọng:
@@ -51,7 +55,8 @@ Quy tắc quan trọng:
 
 ## 3. Server-Sent Events
 
-Hai endpoint `POST /chat` và `POST /chat/{thread_id}/resume` trả:
+Ba endpoint `POST /chat`, `POST /chat/{thread_id}/resume` và
+`POST /suggestions` trả:
 
 ```http
 Content-Type: text/event-stream
@@ -75,6 +80,8 @@ Danh sách event:
 | `clarification_required` | Graph tạm dừng để chờ người dùng | `thread_id`, `message`, `questions` |
 | `token` | Một phần nội dung trả lời của AI | `delta` |
 | `completed` | Lượt xử lý đã hoàn tất | `thread_id`, `answer`, `selected_products` |
+| `suggestions_started` | LLM gợi ý đã bắt đầu chạy | `status` |
+| `suggestions` | Bốn câu hỏi tiếp theo đã sẵn sàng | `questions` |
 | `error` | Lỗi xảy ra sau khi stream đã mở | `code`, `message`, `retryable` |
 
 Giá trị `session.mode`:
@@ -162,6 +169,58 @@ Test bằng cURL:
 curl -N http://127.0.0.1:8000/chat \
   -H 'Content-Type: application/json' \
   -d '{"message":"Tôi muốn mua tủ lạnh cho gia đình"}'
+```
+
+### `POST /suggestions`
+
+Sinh đúng bốn câu hỏi mà người dùng có thể gửi tiếp dựa trên snapshot hội thoại.
+Endpoint này độc lập với `/chat`: frontend gọi nền sau event `completed`, vì vậy
+việc sinh gợi ý không khóa lượt chat tiếp theo.
+
+Request ví dụ:
+
+```json
+{
+  "conversation": [
+    {
+      "role": "user",
+      "content": "Tôi cần máy lạnh cho phòng 20 m²."
+    },
+    {
+      "role": "assistant",
+      "content": "Bạn có thể cân nhắc các mẫu công suất 1.5 HP sau đây."
+    }
+  ]
+}
+```
+
+| Field | Kiểu | Bắt buộc | Ràng buộc |
+| --- | --- | --- | --- |
+| `conversation` | array | Có | 2–40 tin nhắn, tổng tối đa 40.000 ký tự, phải kết thúc bằng assistant |
+| `conversation[].role` | `user` hoặc `assistant` | Có | Vai trò của tin nhắn |
+| `conversation[].content` | string | Có | Sau khi trim phải có nội dung, tối đa 10.000 ký tự |
+
+Stream thành công:
+
+```text
+event: suggestions_started
+data: {"status":"running"}
+
+event: suggestions
+data: {"questions":["Mẫu nào tiết kiệm điện hơn?","Bạn có thể so sánh hai mẫu này không?","Chi phí lắp đặt là bao nhiêu?","Mẫu nào có bảo hành phù hợp hơn?"]}
+
+```
+
+Trong lúc chờ LLM, server có thể phát `: heartbeat`. Nếu sinh gợi ý thất bại sau
+khi stream mở, server phát event `error`; frontend nên bỏ qua lỗi này để luồng chat
+chính vẫn hoạt động bình thường.
+
+Test bằng cURL:
+
+```bash
+curl -N http://127.0.0.1:8000/suggestions \
+  -H 'Content-Type: application/json' \
+  -d '{"conversation":[{"role":"user","content":"Tôi cần máy lạnh."},{"role":"assistant","content":"Bạn có thể cân nhắc máy lạnh 1 HP."}]}'
 ```
 
 ### `POST /chat/{thread_id}/resume`
