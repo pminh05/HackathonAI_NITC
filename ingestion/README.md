@@ -86,9 +86,9 @@ Thứ tự và output:
 | `qdrant.py` | `<dataset>_processed_vi.json` (Cloud) hoặc `<dataset>_embedded.json` (local) | Collection trên Qdrant |
 
 Máy giặt, máy sấy quần áo, máy rửa chén, máy nước nóng, micro karaoke,
-micro thu âm, đồng hồ thông minh, máy tính để bàn, máy tính bảng và máy in dùng
-Qdrant Cloud Inference trực tiếp, nên không cần cài `torch` hoặc chạy embedding
-local:
+micro thu âm, đồng hồ thông minh, máy tính để bàn, màn hình máy tính, máy tính
+bảng và máy in dùng Qdrant Cloud Inference trực tiếp, nên không cần cài `torch`
+hoặc chạy embedding local:
 
 ```powershell
 python may_giat/processing.py
@@ -162,6 +162,22 @@ hình tích hợp. Xung nhịp CPU, model GPU, cổng và kích thước chỉ d
 retrieval/ranking; không được suy thành capability khi nguồn dữ liệu thiếu.
 Production upload đọc `may_tinh_de_ban_processed_vi.json`; `embedding.py` chỉ là
 local fallback.
+
+Màn hình máy tính dùng metadata canonical và Qdrant Cloud Inference:
+
+```powershell
+python man_hinh_may_tinh/processing.py
+python man_hinh_may_tinh/changeName.py
+python man_hinh_may_tinh/dictionary.py
+python man_hinh_may_tinh/qdrant.py
+```
+
+Collection `manhinhmaytinh` dùng UUID ổn định và vector cosine 384 chiều. Giá
+VND được parse lại từ cột hiển thị vì cột sinh sẵn đang lớn hơn thực tế 10 lần.
+Metadata canonical gồm kích thước, độ phân giải, family tấm nền, dạng phẳng/cong,
+response time kèm metric, độ sáng, gamut màu, kết nối, feature tags, loa, VESA,
+cảm ứng và kích thước vật lý. Dataset hiện không có trường tần số quét độc lập;
+không được suy refresh rate từ giới hạn Hz nằm trong mô tả cổng kết nối.
 
 Đồng hồ thông minh cũng chạy trực tiếp qua Cloud Inference:
 

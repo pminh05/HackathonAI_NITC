@@ -19,6 +19,7 @@ from advisor.categories.desktop import load_config as load_desktop_config
 from advisor.categories.karaoke_microphone import (
     load_config as load_karaoke_microphone_config,
 )
+from advisor.categories.monitor import load_config as load_monitor_config
 from advisor.categories.phone_recording_microphone import (
     load_config as load_phone_recording_microphone_config,
 )
@@ -117,6 +118,7 @@ class FakeQdrant:
                 load_phone_recording_microphone_config(),
                 load_smartwatch_config(),
                 load_desktop_config(),
+                load_monitor_config(),
                 load_tablet_config(),
                 load_printer_config(),
             )

@@ -492,15 +492,19 @@ def test_other_answer_is_interpreted_without_second_interrupt() -> None:
     ] == "Nhà có 7 người"
 
 
-def test_unimplemented_intent_returns_placeholder_without_qdrant() -> None:
+def test_monitor_intent_starts_category_clarification_without_qdrant() -> None:
     llm = FakeLLM(intent=IntentLabel.MONITOR)
     qdrant = FakeQdrant()
     graph = build_graph(llm=llm, qdrant_client=qdrant)
     result = graph.invoke(
         {"messages": [HumanMessage(content="Tư vấn màn hình máy tính")]},
-        {"configurable": {"thread_id": "placeholder"}},
+        {"configurable": {"thread_id": "monitor-clarification"}},
     )
-    assert "Màn hình máy tính" in result["response"]["answer"]
+    assert result["conversation"]["active_category"] == "monitor"
+    assert [
+        item["question_id"]
+        for item in result["__interrupt__"][0].value["questions"]
+    ] == ["primary_usage", "budget", "screen_size"]
     assert qdrant.query_kwargs is None
 
 

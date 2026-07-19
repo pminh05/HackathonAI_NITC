@@ -188,6 +188,14 @@ def build_default_registry() -> CategoryRegistry:
     )
     registry.register(
         CategoryDefinition(
+            name="monitor",
+            display_name="Màn hình máy tính",
+            package_path="advisor.categories.monitor",
+            config_path=Path(__file__).with_name("monitor") / "config.yaml",
+        )
+    )
+    registry.register(
+        CategoryDefinition(
             name="tablet",
             display_name="Máy tính bảng",
             package_path="advisor.categories.tablet",
