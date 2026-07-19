@@ -474,7 +474,10 @@ function suggestionConversation(
       .filter((value): value is string => Boolean(value))
       .join("; ");
     if (answerText)
-      messages.push({ role: "user", content: `Thông tin bổ sung: ${answerText}` });
+      messages.push({
+        role: "user",
+        content: `Thông tin bổ sung: ${answerText}`,
+      });
   }
 
   const selected: SuggestionConversationMessage[] = [];
@@ -534,6 +537,28 @@ function finitePrice(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function displayProductName(product: SelectedProduct): string {
+  const name = product.name?.trim();
+  if (!name) return product.product_id;
+  return name.charAt(0).toLocaleUpperCase("vi-VN") + name.slice(1);
+}
+
+function productImageSources(product: SelectedProduct): {
+  primary: string | null;
+  fallback: string | null;
+} {
+  const raw = (product.image_url || product.image_path)?.trim();
+  if (!raw) return { primary: null, fallback: null };
+
+  const primary = resolveProductImageUrl(raw);
+  const filename = raw.split(/[\\/]/).filter(Boolean).pop();
+  const fallback =
+    /^(?:https?:|data:|blob:)/i.test(raw) || !filename
+      ? null
+      : `/${encodeURIComponent(filename)}`;
+  return { primary, fallback };
+}
+
 function MarkdownText({ text }: { text: string }) {
   return (
     <div className="markdown-content">
@@ -542,8 +567,136 @@ function MarkdownText({ text }: { text: string }) {
   );
 }
 
-function ProductCard({ product }: { product: SelectedProduct }) {
-  console.log("ProductCard product:", product);
+function AiFeedbackCard({ product }: { product: SelectedProduct }) {
+  const [feedback, setFeedback] = useState("");
+  const [rating, setRating] = useState(0);
+  const [hoveredRating, setHoveredRating] = useState(0);
+  const [submitted, setSubmitted] = useState(false);
+  const productImage = productImageSources(product);
+
+  const submitFeedback = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitted(true);
+  };
+
+  return (
+    <div className="ai-feedback-block">
+      <a
+        className="mock-product-link"
+        href="#"
+        onClick={(event) => event.preventDefault()}
+        aria-label={`Link minh họa đến trang ${displayProductName(product)}`}
+      >
+        {productImage.primary ? (
+          <img
+            className="mock-link-image"
+            src={productImage.primary}
+            alt=""
+            onError={(event) => {
+              if (
+                productImage.fallback &&
+                event.currentTarget.src !==
+                  new URL(productImage.fallback, window.location.href).href
+              ) {
+                event.currentTarget.src = productImage.fallback;
+              } else {
+                event.currentTarget.hidden = true;
+              }
+            }}
+          />
+        ) : (
+          <span className="mock-link-icon" aria-hidden="true">
+            ↗
+          </span>
+        )}
+        <span>
+          <small>Trang sản phẩm</small>
+          <strong>{displayProductName(product)}</strong>
+        </span>
+        <span className="mock-link-label">Link minh họa</span>
+      </a>
+
+      <section className="ai-feedback-card" aria-labelledby="ai-feedback-title">
+        {submitted ? (
+          <div className="feedback-success" role="status">
+            <span aria-hidden="true">✓</span>
+            <div>
+              <h3>Cảm ơn phản hồi của bạn!</h3>
+              <p>Phản hồi đang được ghi nhận ở giao diện thử nghiệm.</p>
+            </div>
+          </div>
+        ) : (
+          <form className="feedback-form" onSubmit={submitFeedback}>
+            <div className="feedback-heading">
+              <span className="feedback-ai-icon" aria-hidden="true">
+                ✦
+              </span>
+              <div>
+                <h3 id="ai-feedback-title">
+                  Bạn hài lòng với tư vấn của AI không?
+                </h3>
+                <p>Phản hồi của bạn giúp trợ lý tư vấn tốt hơn.</p>
+              </div>
+            </div>
+
+            <fieldset className="rating-fieldset">
+              <legend>Mức độ hài lòng</legend>
+              <div
+                className="star-rating"
+                onMouseLeave={() => setHoveredRating(0)}
+              >
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    type="button"
+                    className={
+                      star <= (hoveredRating || rating) ? "active" : ""
+                    }
+                    onMouseEnter={() => setHoveredRating(star)}
+                    onFocus={() => setHoveredRating(star)}
+                    onBlur={() => setHoveredRating(0)}
+                    onClick={() => setRating(star)}
+                    aria-label={`${star} sao`}
+                    aria-pressed={rating === star}
+                  >
+                    ★
+                  </button>
+                ))}
+                <span>{rating ? `${rating}/5 sao` : "Chọn số sao"}</span>
+              </div>
+            </fieldset>
+
+            <label className="feedback-comment">
+              Chia sẻ thêm <span>(không bắt buộc)</span>
+              <textarea
+                value={feedback}
+                onChange={(event) => setFeedback(event.target.value)}
+                placeholder="AI đã hỗ trợ tốt điều gì hoặc cần cải thiện điều gì?"
+                rows={3}
+              />
+            </label>
+
+            <button
+              className="feedback-submit"
+              type="submit"
+              disabled={rating === 0}
+            >
+              Gửi phản hồi
+            </button>
+          </form>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ProductCard({
+  product,
+  onOpen,
+}: {
+  product: SelectedProduct;
+  onOpen: () => void;
+}) {
   const promotional = finitePrice(product.promotional_price_vnd)
     ? product.promotional_price_vnd
     : null;
@@ -554,9 +707,7 @@ function ProductCard({ product }: { product: SelectedProduct }) {
     ? product.effective_price_vnd
     : null;
   // const currentPrice = promotional ?? effective ?? original;
-  const image = product.image_url || product.image_path;
-
-  const imageUrl = image ? image.replace(/^\/public/, "") : undefined;
+  const productImage = productImageSources(product);
 
   const validOriginal = original !== -1 ? original : null;
   const validPromotional = promotional !== -1 ? promotional : null;
@@ -564,20 +715,40 @@ function ProductCard({ product }: { product: SelectedProduct }) {
   const currentPrice = validPromotional ?? validOriginal;
 
   return (
-    <article className="product-card">
-      {imageUrl ? (
+    <article
+      className="product-card"
+      role="button"
+      tabIndex={0}
+      aria-label={`Mở trang ${displayProductName(product)}`}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+    >
+      {productImage.primary ? (
         <img
           className="product-image"
-          src={imageUrl}
-          alt={product.name || product.product_id}
+          src={productImage.primary}
+          alt={displayProductName(product)}
           onError={(event) => {
-            event.currentTarget.hidden = true;
+            if (
+              productImage.fallback &&
+              event.currentTarget.src !==
+                new URL(productImage.fallback, window.location.href).href
+            ) {
+              event.currentTarget.src = productImage.fallback;
+            } else {
+              event.currentTarget.hidden = true;
+            }
           }}
         />
       ) : null}
       <div className="product-content">
         <div className="product-heading">
-          <h3>{product.name || product.product_id}</h3>
+          <h3>{displayProductName(product)}</h3>
           {product.name ? (
             <span className="product-id">{product.product_id}</span>
           ) : null}
@@ -606,6 +777,13 @@ function ProductCard({ product }: { product: SelectedProduct }) {
             <span>Đánh đổi:</span> {product.trade_off}
           </p>
         ) : null}
+        <div className="product-review-hint">
+          <span aria-hidden="true">↗</span>
+          Xem trang sản phẩm
+          <span className="product-review-arrow" aria-hidden="true">
+            →
+          </span>
+        </div>
       </div>
     </article>
   );
@@ -754,6 +932,10 @@ function ClarificationCard({
 export default function App() {
   const [state, dispatch] = useReducer(reducer, undefined, loadState);
   const [message, setMessage] = useState("");
+  const [feedbackTarget, setFeedbackTarget] = useState<{
+    assistantId: string;
+    product: SelectedProduct;
+  } | null>(null);
   const requestInFlight = useRef(false);
   const activeRequest = useRef<AbortController | null>(null);
   const suggestionRequest = useRef<AbortController | null>(null);
@@ -841,7 +1023,7 @@ export default function App() {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
-  }, [state.items, state.progress, state.error]);
+  }, [state.items, state.progress, state.error, feedbackTarget]);
 
   useEffect(
     () => () => {
@@ -875,10 +1057,7 @@ export default function App() {
     );
     if (!target || target.suggestionsRequested) return;
     const conversation = suggestionConversation(state.items);
-    if (
-      conversation.length < 2 ||
-      conversation.at(-1)?.role !== "assistant"
-    )
+    if (conversation.length < 2 || conversation.at(-1)?.role !== "assistant")
       return;
 
     dispatch({ type: "REQUEST_SUGGESTIONS", id: target.id });
@@ -1111,6 +1290,7 @@ export default function App() {
     suggestionRequest.current = null;
     localStorage.removeItem(STORAGE_KEY);
     setMessage("");
+    setFeedbackTarget(null);
     dispatch({ type: "RESET" });
   };
 
@@ -1235,9 +1415,21 @@ export default function App() {
                           <ProductCard
                             key={product.product_id}
                             product={product}
+                            onOpen={() =>
+                              setFeedbackTarget({
+                                assistantId: item.id,
+                                product,
+                              })
+                            }
                           />
                         ))}
                       </div>
+                    ) : null}
+                    {feedbackTarget?.assistantId === item.id ? (
+                      <AiFeedbackCard
+                        key={feedbackTarget.product.product_id}
+                        product={feedbackTarget.product}
+                      />
                     ) : null}
                     {itemIndex === lastAssistantIndex && canSend ? (
                       <div className="follow-up-block">
