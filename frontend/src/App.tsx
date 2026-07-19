@@ -472,6 +472,7 @@ function MarkdownText({ text }: { text: string }) {
 }
 
 function ProductCard({ product }: { product: SelectedProduct }) {
+  console.log("ProductCard product:", product);
   const promotional = finitePrice(product.promotional_price_vnd)
     ? product.promotional_price_vnd
     : null;
@@ -481,10 +482,15 @@ function ProductCard({ product }: { product: SelectedProduct }) {
   const effective = finitePrice(product.effective_price_vnd)
     ? product.effective_price_vnd
     : null;
-  const currentPrice = promotional ?? effective ?? original;
+  // const currentPrice = promotional ?? effective ?? original;
   const image = product.image_url || product.image_path;
 
   const imageUrl = image ? image.replace(/^\/public/, "") : undefined;
+
+  const validOriginal = original !== -1 ? original : null;
+  const validPromotional = promotional !== -1 ? promotional : null;
+
+  const currentPrice = validPromotional ?? validOriginal;
 
   return (
     <article className="product-card">
@@ -508,13 +514,17 @@ function ProductCard({ product }: { product: SelectedProduct }) {
         {currentPrice !== null ? (
           <div className="product-price">
             <strong>{formatPrice(currentPrice)}</strong>
-            {promotional !== null &&
-            original !== null &&
-            original !== promotional ? (
-              <del>{formatPrice(original)}</del>
+            {validOriginal !== null &&
+            validPromotional !== null &&
+            validOriginal > validPromotional ? (
+              <del>{formatPrice(validOriginal)}</del>
             ) : null}
           </div>
-        ) : null}
+        ) : (
+          <div className="product-price">
+            <strong>Liên hệ với nhân viên</strong>
+          </div>
+        )}
         {product.reason ? (
           <p>
             <span>Phù hợp:</span> {product.reason}
@@ -1208,7 +1218,7 @@ export default function App() {
             }
             onKeyDown={onComposerKeyDown}
             placeholder={composerPlaceholder}
-            rows={2}
+            rows={1}
             disabled={!canSend}
             aria-label="Tin nhắn"
           />
