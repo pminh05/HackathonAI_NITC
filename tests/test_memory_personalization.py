@@ -120,8 +120,11 @@ def test_mem0_v3_adapter_scopes_search_and_adds_inferred_turn() -> None:
     assert add["body"]["user_id"] == USER_A
     assert add["body"]["infer"] is True
     assert add["body"]["custom_instructions"] == CUSTOM_INSTRUCTIONS
+    assert "Luôn viết nội dung memory bằng tiếng Việt" in CUSTOM_INSTRUCTIONS
+    assert "Viết fact ngắn nhưng giàu thông tin" in CUSTOM_INSTRUCTIONS
     assert add["body"]["custom_categories"] == CUSTOM_CATEGORIES
     assert add["body"]["metadata"]["prompt_version"] == MEMORY_PROMPT_VERSION
+    assert MEMORY_PROMPT_VERSION == "product-advisor-memory-v3-vi"
     assert "run_id" not in add["body"]
     assert listed["params"] == {"page": "2", "page_size": "25"}
     assert listed["body"]["filters"] == {"user_id": USER_A}

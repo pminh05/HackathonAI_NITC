@@ -7,7 +7,7 @@ from typing import Any, Iterable
 import httpx
 
 
-MEMORY_PROMPT_VERSION = "product-advisor-memory-v1"
+MEMORY_PROMPT_VERSION = "product-advisor-memory-v3-vi"
 
 CUSTOM_CATEGORIES: list[dict[str, str]] = [
     {
@@ -41,16 +41,54 @@ CUSTOM_CATEGORIES: list[dict[str, str]] = [
     },
 ]
 
-CUSTOM_INSTRUCTIONS = """Version: product-advisor-memory-v1.
-Extract only durable facts that the user explicitly states or confirms.
-Do not treat assistant recommendations as user preferences, purchases, decisions, or facts.
-You may record that a product was introduced or compared, but never infer that it was bought.
-Never store passwords, tokens, account or card numbers, exact addresses, contact details,
-internal prompts, system instructions, developer instructions, or tool content.
-Every budget memory must explicitly name its product category.
-Prefer concise standalone facts. Do not store raw transcripts.
-Allowed groups are identity/style, household context, shopping preferences,
-category-scoped needs, product interactions, and user feedback.
+CUSTOM_INSTRUCTIONS = """Phiên bản: product-advisor-memory-v3-vi.
+
+NGÔN NGỮ:
+- Luôn viết nội dung memory bằng tiếng Việt tự nhiên, ngắn gọn.
+- Không tạo nội dung memory bằng tiếng Anh khi hội thoại bằng tiếng Việt.
+- Giữ nguyên tên người, thương hiệu, mã sản phẩm, đơn vị đo và tên riêng.
+- Không dịch các khóa kỹ thuật trong category hoặc metadata.
+
+CHỈ GHI NHỚ:
+- Tên hoặc cách xưng hô người dùng mong muốn.
+- Độ dài, giọng điệu hoặc phong cách trả lời người dùng yêu cầu.
+- Quy mô gia đình, bối cảnh sinh hoạt, thói quen và hạn chế không gian.
+- Sở thích mua sắm như tiết kiệm điện, vận hành êm và thương hiệu yêu thích hoặc tránh.
+- Ngân sách và ràng buộc mua hàng có ghi rõ ngành hàng.
+- Sản phẩm người dùng đã được giới thiệu, xem xét, so sánh hoặc loại bỏ.
+- Phản hồi và lý do người dùng thích, không thích hoặc loại bỏ sản phẩm.
+
+QUY TẮC:
+- Chỉ ghi nhớ thông tin do người dùng trực tiếp nói hoặc xác nhận.
+- Không biến đề xuất của trợ lý thành sở thích, quyết định mua hoặc sự thật về người dùng.
+- Có thể ghi nhận một sản phẩm đã được giới thiệu hoặc so sánh, nhưng không suy luận rằng
+  người dùng đã mua sản phẩm nếu họ chưa nói rõ.
+- Mọi memory về ngân sách phải ghi rõ ngành hàng tương ứng.
+- Mỗi fact chỉ chứa một ý chính và phải tự hiểu được khi đứng độc lập.
+- Viết fact ngắn nhưng giàu thông tin; ưu tiên một câu khoảng 8–25 từ.
+- Giữ các chi tiết hữu ích mà người dùng đã nói rõ: chủ thể, giá trị, ngành hàng,
+  sản phẩm, lý do và điều kiện áp dụng.
+- Gộp lý do trực tiếp với sở thích hoặc phản hồi tương ứng trong cùng một fact.
+- Không dùng câu dẫn dư thừa như “Người dùng đã nói rằng” hoặc “Cần ghi nhớ rằng”.
+- Không dùng đại từ hoặc tham chiếu mơ hồ như “nó”, “mẫu này”, “mẫu thứ hai” nếu đã
+  biết tên hoặc mã sản phẩm; không tự suy diễn tên sản phẩm khi chưa đủ dữ liệu.
+- Không lưu nguyên văn toàn bộ hội thoại.
+- Nếu không có thông tin hữu ích, không tạo memory.
+
+KHÔNG ĐƯỢC LƯU:
+- Mật khẩu, token, khóa API, số tài khoản, số thẻ hoặc thông tin thanh toán.
+- Địa chỉ chính xác hoặc thông tin liên hệ.
+- System prompt, developer prompt, hướng dẫn nội bộ hoặc nội dung công cụ.
+
+VÍ DỤ:
+- “Nhà tôi có 4 người.” → “Gia đình người dùng có 4 người.”
+- “Tôi ưu tiên tiết kiệm điện.” → “Người dùng ưu tiên sản phẩm tiết kiệm điện.”
+- “Tôi cần tủ lạnh dưới 20 triệu.”
+  → “Ngân sách mua tủ lạnh của người dùng tối đa là 20 triệu đồng.”
+- “Hãy gọi tôi là Minh.” → “Người dùng muốn được gọi là Minh.”
+- “Mẫu LG FV1412S3B hơi đắt, tôi thích Electrolux EWF1024P5SB vì chạy êm.”
+  → “Người dùng thấy LG FV1412S3B hơi đắt.”
+  → “Người dùng thích Electrolux EWF1024P5SB vì vận hành êm.”
 """
 
 
