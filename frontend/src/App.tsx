@@ -16,10 +16,12 @@ import {
   ClarificationQuestion,
   SelectedProduct,
   SseEvent,
+  SuggestionConversationMessage,
   getThreadStatus,
   resolveProductImageUrl,
   resumeChat,
   streamChat,
+  streamSuggestions,
 } from "./api";
 
 const STORAGE_KEY = "product-advisor:mvp:v1";
@@ -31,6 +33,8 @@ type AssistantItem = {
   text: string;
   products: SelectedProduct[];
   streaming?: boolean;
+  suggestions?: string[];
+  suggestionsRequested?: boolean;
 };
 type ClarificationItem = {
   id: string;
@@ -91,6 +95,8 @@ type Action =
   | { type: "MARK_SUBMITTED"; itemId: string }
   | { type: "RECONCILE_WAITING"; questions: ClarificationQuestion[] }
   | { type: "RECONCILE_COMPLETED"; answer: string; products: SelectedProduct[] }
+  | { type: "REQUEST_SUGGESTIONS"; id: string }
+  | { type: "SET_SUGGESTIONS"; id: string; suggestions: string[] }
   | { type: "REQUEST_FAILED"; assistantId?: string; message: string }
   | { type: "CLEAR_ERROR" }
   | { type: "RESET"; message?: string };
@@ -342,11 +348,13 @@ function reducer(state: ChatState, action: Action): ChatState {
         (item) => item.type === "assistant",
       );
       if (lastAssistant > boundary) {
+        const currentAssistant = items[lastAssistant] as AssistantItem;
         items[lastAssistant] = {
-          ...(items[lastAssistant] as AssistantItem),
+          ...currentAssistant,
           text: action.answer,
           products,
           streaming: false,
+          suggestionsRequested: Boolean(currentAssistant.suggestions?.length),
         };
       } else {
         items.push({
@@ -358,6 +366,24 @@ function reducer(state: ChatState, action: Action): ChatState {
       }
       return { ...state, items, phase: "idle", progress: null, error: null };
     }
+    case "REQUEST_SUGGESTIONS":
+      return {
+        ...state,
+        items: state.items.map((item) =>
+          item.id === action.id && item.type === "assistant"
+            ? { ...item, suggestionsRequested: true }
+            : item,
+        ),
+      };
+    case "SET_SUGGESTIONS":
+      return {
+        ...state,
+        items: state.items.map((item) =>
+          item.id === action.id && item.type === "assistant"
+            ? { ...item, suggestions: action.suggestions.slice(0, 4) }
+            : item,
+        ),
+      };
     case "REQUEST_FAILED":
       return {
         ...state,
@@ -410,11 +436,56 @@ const followUpSuggestions = [
   "Tôi muốn biết thêm về sản phẩm",
   "Tôi muốn biết thêm về giá cả",
 ];
-
 function countWords(value: string): number {
   return value.trim().match(/\S+/g)?.length ?? 0;
 }
 
+function suggestionConversation(
+  items: TimelineItem[],
+): SuggestionConversationMessage[] {
+  const messages: SuggestionConversationMessage[] = [];
+  for (const item of items) {
+    if (item.type === "user") {
+      messages.push({ role: "user", content: item.text });
+      continue;
+    }
+    if (item.type === "assistant") {
+      if (item.text.trim())
+        messages.push({ role: "assistant", content: item.text });
+      continue;
+    }
+    const questionText = item.questions
+      .map((question) => question.question)
+      .join(" ");
+    if (questionText)
+      messages.push({ role: "assistant", content: questionText });
+    const answerText = item.questions
+      .map((question) => {
+        const answer = item.answers[question.question_id];
+        if (!answer) return null;
+        const value =
+          answer.option_id === "other"
+            ? answer.custom_answer?.trim()
+            : question.options.find(
+                (option) => option.option_id === answer.option_id,
+              )?.label;
+        return value ? `${question.question}: ${value}` : null;
+      })
+      .filter((value): value is string => Boolean(value))
+      .join("; ");
+    if (answerText)
+      messages.push({ role: "user", content: `Thông tin bổ sung: ${answerText}` });
+  }
+
+  const selected: SuggestionConversationMessage[] = [];
+  let characters = 0;
+  for (const candidate of messages.slice(-40).reverse()) {
+    if (characters + candidate.content.length > 40_000) break;
+    selected.push(candidate);
+    characters += candidate.content.length;
+  }
+  return selected.reverse();
+}
 function limitWords(value: string, maximum: number): string {
   const matches = [...value.matchAll(/\S+/g)];
   if (matches.length <= maximum) return value;
@@ -472,6 +543,7 @@ function MarkdownText({ text }: { text: string }) {
 }
 
 function ProductCard({ product }: { product: SelectedProduct }) {
+  console.log("ProductCard product:", product);
   const promotional = finitePrice(product.promotional_price_vnd)
     ? product.promotional_price_vnd
     : null;
@@ -481,10 +553,15 @@ function ProductCard({ product }: { product: SelectedProduct }) {
   const effective = finitePrice(product.effective_price_vnd)
     ? product.effective_price_vnd
     : null;
-  const currentPrice = promotional ?? effective ?? original;
+  // const currentPrice = promotional ?? effective ?? original;
   const image = product.image_url || product.image_path;
 
   const imageUrl = image ? image.replace(/^\/public/, "") : undefined;
+
+  const validOriginal = original !== -1 ? original : null;
+  const validPromotional = promotional !== -1 ? promotional : null;
+
+  const currentPrice = validPromotional ?? validOriginal;
 
   return (
     <article className="product-card">
@@ -508,13 +585,17 @@ function ProductCard({ product }: { product: SelectedProduct }) {
         {currentPrice !== null ? (
           <div className="product-price">
             <strong>{formatPrice(currentPrice)}</strong>
-            {promotional !== null &&
-            original !== null &&
-            original !== promotional ? (
-              <del>{formatPrice(original)}</del>
+            {validOriginal !== null &&
+            validPromotional !== null &&
+            validOriginal > validPromotional ? (
+              <del>{formatPrice(validOriginal)}</del>
             ) : null}
           </div>
-        ) : null}
+        ) : (
+          <div className="product-price">
+            <strong>Liên hệ với nhân viên</strong>
+          </div>
+        )}
         {product.reason ? (
           <p>
             <span>Phù hợp:</span> {product.reason}
@@ -675,6 +756,7 @@ export default function App() {
   const [message, setMessage] = useState("");
   const requestInFlight = useRef(false);
   const activeRequest = useRef<AbortController | null>(null);
+  const suggestionRequest = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const initialThreadId = useRef(state.threadId);
 
@@ -761,7 +843,13 @@ export default function App() {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [state.items, state.progress, state.error]);
 
-  useEffect(() => () => activeRequest.current?.abort(), []);
+  useEffect(
+    () => () => {
+      activeRequest.current?.abort();
+      suggestionRequest.current?.abort();
+    },
+    [],
+  );
 
   const activeClarification = useMemo(
     () =>
@@ -776,6 +864,48 @@ export default function App() {
     state.phase === "resuming" ||
     state.phase === "restoring";
   const canSend = state.phase === "idle" && !activeClarification;
+
+  useEffect(() => {
+    if (state.phase !== "idle" || activeClarification) return;
+    const target = state.items.findLast(
+      (item): item is AssistantItem =>
+        item.type === "assistant" &&
+        !item.streaming &&
+        Boolean(item.text.trim()),
+    );
+    if (!target || target.suggestionsRequested) return;
+    const conversation = suggestionConversation(state.items);
+    if (
+      conversation.length < 2 ||
+      conversation.at(-1)?.role !== "assistant"
+    )
+      return;
+
+    dispatch({ type: "REQUEST_SUGGESTIONS", id: target.id });
+    suggestionRequest.current?.abort();
+    const controller = new AbortController();
+    suggestionRequest.current = controller;
+    void streamSuggestions(
+      conversation,
+      (event) => {
+        if (event.event === "suggestions") {
+          dispatch({
+            type: "SET_SUGGESTIONS",
+            id: target.id,
+            suggestions: event.data.questions,
+          });
+        }
+      },
+      controller.signal,
+    )
+      .catch(() => {
+        // Suggestions are optional and must never interrupt the chat flow.
+      })
+      .finally(() => {
+        if (suggestionRequest.current === controller)
+          suggestionRequest.current = null;
+      });
+  }, [activeClarification, state.items, state.phase]);
 
   const handleStreamEvent = (
     event: SseEvent,
@@ -832,6 +962,9 @@ export default function App() {
     event?.preventDefault();
     const trimmed = (suggestedMessage ?? message).trim();
     if (!trimmed || !canSend || requestInFlight.current) return;
+
+    suggestionRequest.current?.abort();
+    suggestionRequest.current = null;
 
     requestInFlight.current = true;
     const controller = new AbortController();
@@ -974,6 +1107,8 @@ export default function App() {
 
   const startNewConversation = () => {
     if (busy) return;
+    suggestionRequest.current?.abort();
+    suggestionRequest.current = null;
     localStorage.removeItem(STORAGE_KEY);
     setMessage("");
     dispatch({ type: "RESET" });
@@ -1108,7 +1243,10 @@ export default function App() {
                       <div className="follow-up-block">
                         <span>Bạn có thể hỏi tiếp</span>
                         <div className="suggestion-list follow-up-suggestions">
-                          {followUpSuggestions.map((suggestion) => (
+                          {(item.suggestions?.length
+                            ? item.suggestions
+                            : followUpSuggestions
+                          ).map((suggestion) => (
                             <button
                               type="button"
                               key={suggestion}
@@ -1208,7 +1346,7 @@ export default function App() {
             }
             onKeyDown={onComposerKeyDown}
             placeholder={composerPlaceholder}
-            rows={2}
+            rows={1}
             disabled={!canSend}
             aria-label="Tin nhắn"
           />

@@ -43,6 +43,7 @@ from advisor.schemas import (
     ApplicationSettings,
 )
 from advisor.guardrails import SAFE_OUTPUT_FALLBACK
+from advisor.suggestions import SuggestionResult
 
 
 class FakeStructuredModel:
@@ -586,3 +587,72 @@ def test_health_unknown_thread_and_cors() -> None:
             },
         )
         assert cors.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
+class FakeSuggestionLLM:
+    def __init__(self) -> None:
+        self.inputs: list[Any] = []
+
+    def with_structured_output(self, schema: type[Any], **_: Any) -> Any:
+        assert schema is SuggestionResult
+        owner = self
+
+        class StructuredSuggestions:
+            def invoke(self, value: Any) -> SuggestionResult:
+                owner.inputs.append(value)
+                return SuggestionResult(
+                    questions=[
+                        "Mẫu nào tiết kiệm điện hơn?",
+                        "Bạn có thể so sánh hai sản phẩm này không?",
+                        "Chi phí lắp đặt dự kiến là bao nhiêu?",
+                        "Sản phẩm nào phù hợp nhất với gia đình bốn người?",
+                    ]
+                )
+
+        return StructuredSuggestions()
+
+
+def test_suggestions_stream_returns_four_questions_in_background() -> None:
+    suggestion_llm = FakeSuggestionLLM()
+    application = create_app(
+        graph=FakeStreamingGraph(), suggestion_llm=suggestion_llm
+    )
+    with TestClient(application) as client:
+        response = client.post(
+            "/suggestions",
+            json={
+                "conversation": [
+                    {"role": "user", "content": "Tôi cần mua máy lạnh."},
+                    {
+                        "role": "assistant",
+                        "content": "Bạn có thể cân nhắc hai mẫu máy lạnh này.",
+                    },
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = parse_sse(response.text)
+    assert events[0] == ("suggestions_started", {"status": "running"})
+    assert events[-1][0] == "suggestions"
+    assert len(events[-1][1]["questions"]) == 4
+    assert suggestion_llm.inputs
+
+
+def test_suggestions_require_conversation_to_end_with_assistant() -> None:
+    application = create_app(
+        graph=FakeStreamingGraph(), suggestion_llm=FakeSuggestionLLM()
+    )
+    with TestClient(application) as client:
+        response = client.post(
+            "/suggestions",
+            json={
+                "conversation": [
+                    {"role": "assistant", "content": "Xin chào."},
+                    {"role": "user", "content": "Tôi cần mua máy lạnh."},
+                ]
+            },
+        )
+
+    assert response.status_code == 422
