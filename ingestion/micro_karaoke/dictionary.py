@@ -1,70 +1,44 @@
+"""Build a value dictionary from canonical micro-karaoke metadata."""
+
 import json
-import re
 import sys
 from pathlib import Path
 
+
 DATASET = "micro_karaoke"
 CATEGORY = "micro karaoke"
-DICTIONARY_FIELDS = ["Loại sản phẩm","Băng tần","loai_du_lieu_tan_so","toan_tu_do_meo"]
+DICTIONARY_FIELDS = {
+    "microphone_type": "Loại micro chuẩn hóa",
+    "wireless_band": "Băng tần không dây chuẩn hóa",
+    "frequency_data_type": "Loại dữ liệu tần số",
+    "distortion_operator": "Cách diễn giải độ méo tiếng",
+}
 BASE_DIR = Path(__file__).resolve().parent
 INPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed_vi.json"
 OUTPUT_FILE = BASE_DIR / "data" / f"{DATASET}_dictionary.json"
 
 
-def clean(value):
-    if value is None:
-        return None
-    value = re.sub(r"\s+", " ", str(value)).strip()
-    return value or None
-
-
-def candidate_keys(field):
-    return [field, field.replace("_", " ").capitalize()]
-
-
-def find_value(metadata, field):
-    for key in candidate_keys(field):
-        value = clean(metadata.get(key))
-        if value:
-            return value
-    return None
-
-
-def main():
+def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-
     products = json.loads(INPUT_FILE.read_text(encoding="utf-8-sig"))
+    if not isinstance(products, list) or not products:
+        raise ValueError("Không có dữ liệu micro karaoke đã chuẩn hóa")
     fields = {}
-
-    for field in DICTIONARY_FIELDS:
-        values = set()
-        for product in products:
-            metadata = product.get("metadata", {})
-            value = find_value(metadata, field)
-            if value and value.casefold() not in {"không", "không có", "none"}:
-                for part in value.split("|"):
-                    part = clean(part)
-                    if part:
-                        values.add(part)
-
+    for field, description in DICTIONARY_FIELDS.items():
+        values = {
+            str(value)
+            for product in products
+            if (value := (product.get("metadata") or {}).get(field)) is not None
+        }
         fields[field] = {
-            "description": (
-                f"Các giá trị {field.lower()} dùng để tìm kiếm, "
-                f"lọc và hiểu sản phẩm {CATEGORY}."
-            ),
+            "description": description,
             "data_type": "string",
             "possible_values": sorted(values, key=str.casefold),
         }
-
-    result = {
-        "dataset": DATASET,
-        "category": CATEGORY,
-        "fields": fields,
-    }
+    result = {"dataset": DATASET, "category": CATEGORY, "fields": fields}
     OUTPUT_FILE.write_text(
-        json.dumps(result, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print(f"Đã tạo dictionary -> {OUTPUT_FILE}")
 

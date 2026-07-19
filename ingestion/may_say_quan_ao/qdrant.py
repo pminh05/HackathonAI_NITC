@@ -1,5 +1,4 @@
 import json
-import math
 import os
 import sys
 import uuid
@@ -11,36 +10,45 @@ from qdrant_client import QdrantClient, models
 DATASET = "may_say_quan_ao"
 COLLECTION_NAME = "maysayquanao"
 BASE_DIR = Path(__file__).resolve().parent
-INPUT_FILE = BASE_DIR / "data" / f"{DATASET}_embedded.json"
+INPUT_FILE = BASE_DIR / "data" / f"{DATASET}_processed_vi.json"
 EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 VECTOR_SIZE = 384
 BATCH_SIZE = 64
 POINT_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, f"ingestion:{DATASET}")
+REQUIRED_METADATA_FIELDS = {
+    "category_scope",
+    "dryer_type",
+    "dry_capacity_kg",
+}
 
 
-def validate_vector(vector, index, expected_size):
-    if not isinstance(vector, list) or len(vector) != expected_size:
-        raise ValueError(f"Vector không hợp lệ tại index {index}")
-    cleaned = []
-    for position, value in enumerate(vector):
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"Vector index {index}, vị trí {position} không phải số")
-        value = float(value)
-        if not math.isfinite(value):
-            raise ValueError(f"Vector index {index} chứa NaN/Infinity")
-        cleaned.append(value)
-    return cleaned
+def validate_metadata(metadata, index):
+    """Reject stale pre-normalization payloads before they reach Qdrant."""
+    if not isinstance(metadata, dict):
+        raise ValueError(f"Sản phẩm index {index} thiếu metadata")
+    missing = sorted(REQUIRED_METADATA_FIELDS - metadata.keys())
+    if missing:
+        raise ValueError(
+            f"Sản phẩm index {index} thiếu metadata canonical: {', '.join(missing)}. "
+            "Hãy chạy lại processing.py và changeName.py trước qdrant.py."
+        )
+    if metadata["category_scope"] != "dryer":
+        raise ValueError(
+            f"Sản phẩm index {index} có category_scope không hợp lệ: "
+            f"{metadata['category_scope']!r}"
+        )
+    return metadata
 
 
 def load_products():
     products = json.loads(INPUT_FILE.read_text(encoding="utf-8-sig"))
     if not isinstance(products, list) or not products:
-        raise ValueError("Không có dữ liệu máy sấy đã embedding để upload")
+        raise ValueError("Không có dữ liệu máy sấy đã chuẩn hóa để upload")
     return products
 
 
-def point_generator(products, expected_size=VECTOR_SIZE):
-    """Yield deterministic points with the stable runtime payload contract."""
+def point_generator(products):
+    """Yield canonical points and let Qdrant Cloud embed their passage text."""
     seen_ids = set()
     for index, product in enumerate(products):
         product_id = str(product.get("id") or "").strip()
@@ -51,17 +59,21 @@ def point_generator(products, expected_size=VECTOR_SIZE):
         text = str(product.get("text") or "").strip()
         if not text:
             raise ValueError(f"Sản phẩm index {index} thiếu semantic text")
+        metadata = validate_metadata(product.get("metadata"), index)
         seen_ids.add(product_id)
 
         yield models.PointStruct(
             id=str(uuid.uuid5(POINT_NAMESPACE, product_id)),
-            vector=validate_vector(product.get("vector"), index, expected_size),
+            vector=models.Document(
+                text=f"passage: {text}",
+                model=EMBEDDING_MODEL,
+            ),
             payload={
                 "product_id": product_id,
                 "name": product.get("name"),
                 "text": text,
                 "image_path": product.get("image_path"),
-                "metadata": product.get("metadata", {}),
+                "metadata": metadata,
             },
         )
 
@@ -78,7 +90,12 @@ def main():
 
     products = load_products()
 
-    client = QdrantClient(url=url, api_key=api_key, timeout=120)
+    client = QdrantClient(
+        url=url,
+        api_key=api_key,
+        cloud_inference=True,
+        timeout=120,
+    )
     if not client.collection_exists(COLLECTION_NAME):
         client.create_collection(
             collection_name=COLLECTION_NAME,

@@ -429,6 +429,13 @@ const starterSuggestions = [
   // "Tôi muốn biết về chính sách đổi trả",
   // "Tôi muốn biết về chính sách vận chuyển",
 ];
+const followUpSuggestions = [
+  // "Tôi muốn biết về chính sách bảo hành",
+  // "Tôi muốn biết về chính sách đổi trả",
+  // "Tôi muốn biết về chính sách vận chuyển",
+  "Tôi muốn biết thêm về sản phẩm",
+  "Tôi muốn biết thêm về giá cả",
+];
 function countWords(value: string): number {
   return value.trim().match(/\S+/g)?.length ?? 0;
 }
@@ -479,7 +486,6 @@ function suggestionConversation(
   }
   return selected.reverse();
 }
-
 function limitWords(value: string, maximum: number): string {
   const matches = [...value.matchAll(/\S+/g)];
   if (matches.length <= maximum) return value;
@@ -1233,13 +1239,14 @@ export default function App() {
                         ))}
                       </div>
                     ) : null}
-                    {itemIndex === lastAssistantIndex &&
-                    canSend &&
-                    item.suggestions?.length ? (
+                    {itemIndex === lastAssistantIndex && canSend ? (
                       <div className="follow-up-block">
                         <span>Bạn có thể hỏi tiếp</span>
                         <div className="suggestion-list follow-up-suggestions">
-                          {item.suggestions.map((suggestion) => (
+                          {(item.suggestions?.length
+                            ? item.suggestions
+                            : followUpSuggestions
+                          ).map((suggestion) => (
                             <button
                               type="button"
                               key={suggestion}

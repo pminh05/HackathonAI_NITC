@@ -116,4 +116,5 @@ def test_supported_categories_question_does_not_require_llm() -> None:
 
     assert result["control"]["stage"] == "completed"
     assert "Máy giặt" in result["response"]["answer"]
+    assert "Màn hình máy tính" in result["response"]["answer"]
     assert "Máy in" in result["response"]["answer"]

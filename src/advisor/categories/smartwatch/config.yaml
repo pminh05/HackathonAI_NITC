@@ -1,0 +1,144 @@
+category: smartwatch
+display_name: Đồng hồ thông minh
+collection: donghothongminh
+embedding_model: intfloat/multilingual-e5-small
+retrieval_limit: 12
+
+required_profile_fields:
+  - primary_usage
+  - budget
+  - phone_platform
+
+payload_fields:
+  category_scope: metadata.category_scope
+  brand_key: metadata.brand_key
+  original_price: metadata.original_price_vnd
+  promotional_price: metadata.promotional_price_vnd
+  compatible_platforms: metadata.compatible_platforms
+  call_mode: metadata.call_mode
+  cellular: metadata.has_cellular
+  gps: metadata.has_gps
+  notifications: metadata.has_notifications
+  swim_ready: metadata.swim_ready
+  health_features: metadata.health_feature_tags
+  display_family: metadata.display_family
+  strap_material_family: metadata.strap_material_family
+  screen_size: metadata.screen_size_inch
+  case_width: metadata.case_width_mm
+  weight: metadata.weight_g
+  wrist_min: metadata.wrist_min_cm
+  wrist_max: metadata.wrist_max_cm
+  typical_battery_hours: metadata.typical_battery_hours
+  water_resistance_atm: metadata.water_resistance_atm
+
+payload_indexes:
+  metadata.category_scope: keyword
+  metadata.brand_key: keyword
+  metadata.original_price_vnd: integer
+  metadata.promotional_price_vnd: integer
+  metadata.compatible_platforms: keyword
+  metadata.call_mode: keyword
+  metadata.has_cellular: bool
+  metadata.has_gps: bool
+  metadata.has_notifications: bool
+  metadata.swim_ready: bool
+  metadata.health_feature_tags: keyword
+  metadata.display_family: keyword
+  metadata.strap_material_family: keyword
+  metadata.screen_size_inch: float
+  metadata.case_width_mm: float
+  metadata.weight_g: float
+  metadata.wrist_min_cm: float
+  metadata.wrist_max_cm: float
+  metadata.typical_battery_hours: float
+  metadata.water_resistance_atm: float
+
+question_catalog:
+  primary_usage:
+    question_type: implicit
+    question: Bạn chủ yếu muốn dùng đồng hồ thông minh cho nhu cầu nào?
+    options:
+      - option_id: health_monitoring
+        label: Theo dõi sức khỏe hằng ngày
+        profile_updates:
+          usage_preferences: [health_monitoring]
+          soft_preferences: [heart_rate, sleep, health_insights]
+      - option_id: fitness_sports
+        label: Luyện tập và thể thao
+        profile_updates:
+          usage_preferences: [fitness_sports]
+          soft_preferences: [workout_tracking, heart_rate]
+      - option_id: outdoor_navigation
+        label: Hoạt động ngoài trời cần GPS
+        profile_updates:
+          usage_preferences: [outdoor_navigation]
+          soft_preferences: [long_battery, water_resistance]
+          hard_constraints: {requires_gps: true}
+      - option_id: calls_notifications
+        label: Cần nghe gọi và nhận thông báo trên cổ tay
+        profile_updates:
+          usage_preferences: [calls_notifications]
+          hard_constraints:
+            call_requirement: on_wrist
+            requires_notifications: true
+      - option_id: children_safety
+        label: Liên lạc và định vị cho trẻ em
+        profile_updates:
+          usage_preferences: [children_safety]
+          soft_preferences: [sos]
+          hard_constraints:
+            call_requirement: standalone
+            requires_gps: true
+      - option_id: everyday_style
+        label: Đeo hằng ngày và ưu tiên thiết kế
+        profile_updates:
+          usage_preferences: [everyday_style]
+          soft_preferences: [comfortable_fit, battery_life, design]
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  budget:
+    question_type: explicit
+    question: Ngân sách tối đa bạn dự kiến dành cho đồng hồ thông minh là bao nhiêu?
+    options:
+      - option_id: under_2m
+        label: Tối đa 2 triệu đồng
+        profile_updates: {budget_max_vnd: 2000000}
+      - option_id: 2m_5m
+        label: Khoảng 2–5 triệu đồng
+        profile_updates: {budget_max_vnd: 5000000}
+      - option_id: 5m_10m
+        label: Khoảng 5–10 triệu đồng
+        profile_updates: {budget_max_vnd: 10000000}
+      - option_id: 10m_20m
+        label: Khoảng 10–20 triệu đồng
+        profile_updates: {budget_max_vnd: 20000000}
+      - option_id: over_20m
+        label: Trên 20 triệu đồng
+        profile_updates:
+          budget_segment: premium
+          soft_preferences: [premium]
+      - option_id: open
+        label: Chưa chốt ngân sách
+        profile_updates: {budget_segment: open}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  phone_platform:
+    question_type: explicit
+    question: Điện thoại bạn đang dùng thuộc hệ nào?
+    options:
+      - option_id: ios
+        label: iPhone / iOS
+        profile_updates: {phone_platform: ios}
+      - option_id: android
+        label: Android
+        profile_updates: {phone_platform: android}
+      - option_id: flexible
+        label: Không quan trọng hệ điện thoại
+        profile_updates: {phone_platform: flexible}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}

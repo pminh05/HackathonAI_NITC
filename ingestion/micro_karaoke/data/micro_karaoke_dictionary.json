@@ -2,31 +2,38 @@
   "dataset": "micro_karaoke",
   "category": "micro karaoke",
   "fields": {
-    "Loại sản phẩm": {
-      "description": "Các giá trị loại sản phẩm dùng để tìm kiếm, lọc và hiểu sản phẩm micro karaoke.",
+    "microphone_type": {
+      "description": "Loại micro chuẩn hóa",
       "data_type": "string",
       "possible_values": [
-        "Có dây",
-        "Không dây"
+        "wired",
+        "wireless"
       ]
     },
-    "Băng tần": {
-      "description": "Các giá trị băng tần dùng để tìm kiếm, lọc và hiểu sản phẩm micro karaoke.",
+    "wireless_band": {
+      "description": "Băng tần không dây chuẩn hóa",
       "data_type": "string",
       "possible_values": [
-        "2.4 GHz",
-        "UHF"
+        "2_4_ghz",
+        "uhf"
       ]
     },
-    "loai_du_lieu_tan_so": {
-      "description": "Các giá trị loai_du_lieu_tan_so dùng để tìm kiếm, lọc và hiểu sản phẩm micro karaoke.",
+    "frequency_data_type": {
+      "description": "Loại dữ liệu tần số",
       "data_type": "string",
-      "possible_values": []
+      "possible_values": [
+        "audio",
+        "rf",
+        "rf_and_audio"
+      ]
     },
-    "toan_tu_do_meo": {
-      "description": "Các giá trị toan_tu_do_meo dùng để tìm kiếm, lọc và hiểu sản phẩm micro karaoke.",
+    "distortion_operator": {
+      "description": "Cách diễn giải độ méo tiếng",
       "data_type": "string",
-      "possible_values": []
+      "possible_values": [
+        "Bằng hoặc xấp xỉ",
+        "Nhỏ hơn"
+      ]
     }
   }
 }

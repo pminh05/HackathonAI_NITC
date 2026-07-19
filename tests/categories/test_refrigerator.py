@@ -492,15 +492,19 @@ def test_other_answer_is_interpreted_without_second_interrupt() -> None:
     ] == "Nhà có 7 người"
 
 
-def test_unimplemented_intent_returns_placeholder_without_qdrant() -> None:
-    llm = FakeLLM(intent=IntentLabel.KARAOKE_MICROPHONE)
+def test_monitor_intent_starts_category_clarification_without_qdrant() -> None:
+    llm = FakeLLM(intent=IntentLabel.MONITOR)
     qdrant = FakeQdrant()
     graph = build_graph(llm=llm, qdrant_client=qdrant)
     result = graph.invoke(
-        {"messages": [HumanMessage(content="Tư vấn micro karaoke")]},
-        {"configurable": {"thread_id": "placeholder"}},
+        {"messages": [HumanMessage(content="Tư vấn màn hình máy tính")]},
+        {"configurable": {"thread_id": "monitor-clarification"}},
     )
-    assert "máy rửa chén" in result["response"]["answer"]
+    assert result["conversation"]["active_category"] == "monitor"
+    assert [
+        item["question_id"]
+        for item in result["__interrupt__"][0].value["questions"]
+    ] == ["primary_usage", "budget", "screen_size"]
     assert qdrant.query_kwargs is None
 
 
@@ -614,9 +618,9 @@ def test_switching_to_unsupported_category_and_returning_restores_refrigerator_c
                 has_profile_update=True,
             ),
             TurnAnalysisResult(
-                category=IntentLabel.KARAOKE_MICROPHONE,
+                category=IntentLabel.MONITOR,
                 category_transition="switch",
-                switch_evidence="micro karaoke",
+                switch_evidence="màn hình máy tính",
                 action="switch_category",
             ),
             TurnAnalysisResult(
@@ -636,9 +640,9 @@ def test_switching_to_unsupported_category_and_returning_restores_refrigerator_c
     )
     first_profile = first["need_profile"]
     switched = graph.invoke(
-        {"messages": [HumanMessage(content="Chuyển qua micro karaoke")]}, config
+        {"messages": [HumanMessage(content="Chuyển qua màn hình máy tính")]}, config
     )
-    assert switched["conversation"]["active_category"] == "karaoke_microphone"
+    assert switched["conversation"]["active_category"] == "monitor"
 
     restored = graph.invoke(
         {"messages": [HumanMessage(content="Quay lại tủ lạnh")]}, config

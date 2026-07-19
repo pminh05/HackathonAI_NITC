@@ -83,10 +83,12 @@ Thứ tự và output:
 | `changeName.py` | `<dataset>_processed.json` | `<dataset>_processed_vi.json` |
 | `dictionary.py` | `<dataset>_processed_vi.json` | `<dataset>_dictionary.json` |
 | `embedding.py` | `<dataset>_processed_vi.json` | `<dataset>_embedded.json` |
-| `qdrant.py` | `<dataset>_embedded.json` | Collection trên Qdrant |
+| `qdrant.py` | `<dataset>_processed_vi.json` (Cloud) hoặc `<dataset>_embedded.json` (local) | Collection trên Qdrant |
 
-Máy giặt, máy rửa chén, máy nước nóng, máy tính bảng và máy in dùng Qdrant
-Cloud Inference trực tiếp, nên không cần cài `torch` hoặc chạy embedding local:
+Máy giặt, máy sấy quần áo, máy rửa chén, máy nước nóng, micro karaoke,
+micro thu âm, đồng hồ thông minh, máy tính để bàn, màn hình máy tính, máy tính
+bảng và máy in dùng Qdrant Cloud Inference trực tiếp, nên không cần cài `torch`
+hoặc chạy embedding local:
 
 ```powershell
 python may_giat/processing.py
@@ -143,6 +145,57 @@ hệ điều hành, RAM, bộ nhớ, màn hình, khối lượng, kết nối Wi
 mạng, gọi điện và thẻ nhớ. Giá được parse lại từ cột hiển thị vì cột sinh sẵn
 trong dataset đang lớn hơn thực tế 10 lần.
 
+Máy tính để bàn dùng metadata canonical và Qdrant Cloud Inference:
+
+```powershell
+python may_tinh_de_ban/processing.py
+python may_tinh_de_ban/changeName.py
+python may_tinh_de_ban/dictionary.py
+python may_tinh_de_ban/qdrant.py
+```
+
+Collection `maytinhdeban` dùng UUID ổn định và vector cosine 384 chiều. Giá VND
+được parse lại từ cột hiển thị vì cột sinh sẵn đang lớn hơn thực tế 10 lần.
+Metadata canonical gồm kiểu all-in-one/bộ máy riêng, CPU vendor, hệ điều hành,
+RAM và khả năng nâng cấp, tổng dung lượng/loại ổ, GPU tích hợp/rời, Wi-Fi và màn
+hình tích hợp. Xung nhịp CPU, model GPU, cổng và kích thước chỉ dùng để semantic
+retrieval/ranking; không được suy thành capability khi nguồn dữ liệu thiếu.
+Production upload đọc `may_tinh_de_ban_processed_vi.json`; `embedding.py` chỉ là
+local fallback.
+
+Màn hình máy tính dùng metadata canonical và Qdrant Cloud Inference:
+
+```powershell
+python man_hinh_may_tinh/processing.py
+python man_hinh_may_tinh/changeName.py
+python man_hinh_may_tinh/dictionary.py
+python man_hinh_may_tinh/qdrant.py
+```
+
+Collection `manhinhmaytinh` dùng UUID ổn định và vector cosine 384 chiều. Giá
+VND được parse lại từ cột hiển thị vì cột sinh sẵn đang lớn hơn thực tế 10 lần.
+Metadata canonical gồm kích thước, độ phân giải, family tấm nền, dạng phẳng/cong,
+response time kèm metric, độ sáng, gamut màu, kết nối, feature tags, loa, VESA,
+cảm ứng và kích thước vật lý. Dataset hiện không có trường tần số quét độc lập;
+không được suy refresh rate từ giới hạn Hz nằm trong mô tả cổng kết nối.
+
+Đồng hồ thông minh cũng chạy trực tiếp qua Cloud Inference:
+
+```powershell
+python dong_ho_thong_minh/processing.py
+python dong_ho_thong_minh/changeName.py
+python dong_ho_thong_minh/dictionary.py
+python dong_ho_thong_minh/qdrant.py
+```
+
+Collection `donghothongminh` dùng UUID ổn định và metadata canonical cho giá,
+tương thích iOS/Android, nhóm màn hình và chất liệu dây, kích thước đeo, khối
+lượng, thời lượng pin ở chế độ thường và ATM. Các capability quan trọng được
+tách thành `call_mode`, `has_cellular`, `has_gps`, `has_notifications`,
+`swim_ready` và `health_feature_tags` thay vì gom chung một field. Không suy thời
+lượng từ mAh, không quy đổi IP sang ATM và không suy tương thích chỉ dựa trên hãng.
+`embedding.py` được giữ làm công cụ local tùy chọn, không phải input production.
+
 Máy in chạy tương tự:
 
 ```powershell
@@ -156,6 +209,43 @@ Collection `mayin` chuẩn hóa công nghệ laser/phun/nhiệt, màu/đơn sắ
 tốc độ, công suất tháng, kết nối, khổ giấy, in hai mặt và kích thước mm. Semantic
 text chỉ lấy thông số máy in và không dùng các trường máy lạnh có trong pipeline
 cũ.
+
+Micro karaoke dùng Qdrant Cloud Inference và metadata canonical:
+
+```powershell
+python micro_karaoke/processing.py
+python micro_karaoke/changeName.py
+python micro_karaoke/dictionary.py
+python micro_karaoke/qdrant.py
+```
+
+`qdrant.py` đọc trực tiếp `micro_karaoke_processed_vi.json`, gửi semantic text
+cho model `intfloat/multilingual-e5-small` trên Qdrant Cloud và upsert point theo
+UUID ổn định. Collection `microkaraoke` dùng vector cosine 384 chiều. Metadata
+canonical gồm `brand_key`, loại có dây/không dây, băng tần, giá VND, dải tần số
+sóng, dải tần âm thanh, độ méo và năm sản xuất. Các tần số có cảnh báo chất lượng
+không được ghi vào field canonical; cảnh báo được giữ trong `data_quality_flags`.
+Do phần lớn catalog hiện chưa có giá xác minh, người dùng có thể chọn ngân sách
+`open`; nếu chọn mức trần cụ thể thì sản phẩm có giá vượt trần sẽ bị loại, còn
+sản phẩm chưa có giá vẫn được giữ làm phương án tham khảo và phải hiển thị cảnh
+báo chưa thể xác nhận phù hợp ngân sách.
+
+Micro thu âm dùng Qdrant Cloud Inference và metadata canonical riêng:
+
+```powershell
+python micro_thu_am_dien_thoai/processing.py
+python micro_thu_am_dien_thoai/changeName.py
+python micro_thu_am_dien_thoai/dictionary.py
+python micro_thu_am_dien_thoai/qdrant.py
+```
+
+Collection `microthuamdienthoai` dùng UUID ổn định và vector cosine 384 chiều.
+Metadata canonical gồm loại micro, giá VND, thiết bị tương thích, cổng kết nối,
+feature tags, hướng thu, băng tần, số bộ phát/thu, thời lượng và phạm vi truyền.
+Các cột sinh sai hoặc không đáng tin cậy không được chép vào canonical metadata;
+cảnh báo được giữ trong `data_quality_flags`. Production upload đọc trực tiếp
+`micro_thu_am_dien_thoai_processed_vi.json` và dùng Cloud Inference; script
+`embedding.py` chỉ là local fallback.
 
 Tủ mát và tủ đông dùng pipeline local embedding đầy đủ:
 
@@ -180,20 +270,21 @@ lực, dung tích, nhiệt độ, Inverter, gas, kích thước và các `featur
 lọc. Hai family dùng chung collection nhưng luôn được lọc bằng metadata khi nhu
 cầu người dùng đã xác định loại tủ.
 
-Máy sấy quần áo dùng pipeline local embedding đầy đủ:
+Máy sấy quần áo dùng metadata canonical và Qdrant Cloud Inference:
 
 ```powershell
 python may_say_quan_ao/processing.py
 python may_say_quan_ao/changeName.py
 python may_say_quan_ao/dictionary.py
-python may_say_quan_ao/embedding.py
 python may_say_quan_ao/qdrant.py
 ```
 
-Collection `maysayquanao` dùng vector cosine 384 chiều. Metadata canonical gồm
-`dryer_type`, giá VND, tải sấy kg, khoảng số người, kích thước cm, công suất W,
-inverter và cảm biến. Các trường công nghệ/tiện ích tiếng Việt vẫn được giữ cho
-semantic retrieval và ranking.
+`qdrant.py` đọc trực tiếp `may_say_quan_ao_processed_vi.json` và từ chối upload
+nếu metadata canonical còn thiếu, tránh dùng nhầm file embedding cũ. Collection
+`maysayquanao` dùng vector cosine 384 chiều. Metadata canonical gồm `dryer_type`,
+giá VND, tải sấy kg, khoảng số người, kích thước cm, công suất W, inverter và cảm
+biến. Các trường công nghệ/tiện ích tiếng Việt vẫn được giữ cho semantic
+retrieval và ranking.
 
 `processing.py` tạo `text` semantic tối đa 480 token và thêm `image_path` ở cấp đối tượng. Ví dụ:
 

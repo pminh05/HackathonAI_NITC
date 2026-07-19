@@ -1,0 +1,121 @@
+category: desktop
+display_name: Máy tính để bàn
+collection: maytinhdeban
+embedding_model: intfloat/multilingual-e5-small
+retrieval_limit: 12
+
+required_profile_fields:
+  - primary_usage
+  - budget
+  - desktop_form
+
+payload_fields:
+  category_scope: metadata.category_scope
+  brand: metadata.brand_key
+  original_price: metadata.original_price_vnd
+  promotional_price: metadata.promotional_price_vnd
+  desktop_form: metadata.desktop_form
+  cpu_vendor: metadata.cpu_vendor
+  os_families: metadata.os_family_tags
+  ram: metadata.ram_gb
+  ram_max: metadata.ram_max_gb
+  storage: metadata.storage_total_gb
+  storage_types: metadata.storage_type_tags
+  gpu_type: metadata.gpu_type
+  wifi: metadata.has_wifi
+  screen_size: metadata.screen_size_inch
+
+payload_indexes:
+  metadata.category_scope: keyword
+  metadata.brand_key: keyword
+  metadata.original_price_vnd: integer
+  metadata.promotional_price_vnd: integer
+  metadata.desktop_form: keyword
+  metadata.cpu_vendor: keyword
+  metadata.os_family_tags: keyword
+  metadata.ram_gb: integer
+  metadata.ram_max_gb: integer
+  metadata.storage_total_gb: integer
+  metadata.storage_type_tags: keyword
+  metadata.gpu_type: keyword
+  metadata.has_wifi: bool
+  metadata.screen_size_inch: float
+
+question_catalog:
+  primary_usage:
+    question_type: explicit
+    question: Bạn chủ yếu dùng máy tính để bàn cho nhu cầu nào?
+    options:
+      - option_id: office_study
+        label: Văn phòng và học tập
+        profile_updates:
+          usage_preferences: [office_study]
+          soft_preferences: [stable_daily_use, energy_saving]
+      - option_id: programming_multitasking
+        label: Lập trình và đa nhiệm
+        profile_updates:
+          usage_preferences: [programming_multitasking]
+          soft_preferences: [multitasking, ram_upgrade, fast_storage]
+      - option_id: gaming
+        label: Chơi game
+        profile_updates:
+          usage_preferences: [gaming]
+          soft_preferences: [gaming_performance, discrete_gpu]
+      - option_id: creative_content
+        label: Thiết kế và dựng nội dung
+        profile_updates:
+          usage_preferences: [creative_content]
+          soft_preferences: [graphics_performance, high_ram, fast_storage]
+      - option_id: engineering_workstation
+        label: Kỹ thuật và workstation
+        profile_updates:
+          usage_preferences: [engineering_workstation]
+          soft_preferences: [multicore_performance, high_ram, upgradeability]
+      - option_id: general
+        label: Dùng đa mục đích
+        profile_updates: {usage_preferences: [general]}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  budget:
+    question_type: explicit
+    question: Ngân sách tối đa bạn dự kiến dành cho máy tính để bàn là bao nhiêu?
+    options:
+      - option_id: under_15m
+        label: Tối đa 15 triệu đồng
+        profile_updates: {budget_max_vnd: 15000000}
+      - option_id: 15m_30m
+        label: Khoảng 15–30 triệu đồng
+        profile_updates: {budget_max_vnd: 30000000}
+      - option_id: 30m_50m
+        label: Khoảng 30–50 triệu đồng
+        profile_updates: {budget_max_vnd: 50000000}
+      - option_id: over_50m
+        label: Trên 50 triệu đồng
+        profile_updates:
+          budget_segment: premium
+          soft_preferences: [premium]
+      - option_id: open
+        label: Chưa chốt ngân sách
+        profile_updates: {budget_segment: open}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
+
+  desktop_form:
+    question_type: explicit
+    question: Bạn muốn máy liền màn hình hay bộ máy dùng màn hình riêng?
+    options:
+      - option_id: all_in_one
+        label: Máy all-in-one liền màn hình
+        profile_updates: {form_preference: all_in_one}
+      - option_id: separate_unit
+        label: Bộ máy dùng màn hình riêng
+        profile_updates: {form_preference: separate_unit}
+      - option_id: flexible
+        label: Kiểu nào cũng được
+        profile_updates: {form_preference: flexible}
+      - option_id: other
+        label: Khác – tôi muốn nhập câu trả lời
+        profile_updates: {}
