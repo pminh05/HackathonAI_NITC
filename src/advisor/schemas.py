@@ -40,7 +40,16 @@ class ApplicationSettings(BaseSettings):
     api_public_frontend_url: str | None = "https://hackathon-ai-nitc-eight.vercel.app"
     sse_heartbeat_seconds: float = 15.0
     guardrail_mode: Literal["enforce", "observe"] = "enforce"
-    guardrail_output_holdback_chars: int = Field(default=64, ge=64, le=256)
+    guardrail_output_holdback_chars: int = Field(default=64, ge=16, le=256)
+    memory_enabled: bool = False
+    mem0_api_key: SecretStr | None = None
+    mem0_base_url: str = "https://api.mem0.ai"
+    mem0_search_top_k: int = Field(default=10, ge=1, le=1_000)
+    mem0_search_threshold: float = Field(default=0.2, ge=0.0, le=1.0)
+    mem0_search_timeout_seconds: float = Field(default=3.0, gt=0)
+    supabase_url: str | None = None
+    supabase_publishable_key: SecretStr | None = None
+    supabase_auth_timeout_seconds: float = Field(default=5.0, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=("../.env", ".env"),
@@ -205,6 +214,40 @@ class ClarificationSubmission(BaseModel):
         ids = [answer.question_id for answer in self.answers]
         if len(ids) != len(set(ids)):
             raise ValueError("Each clarification question may be answered only once")
+        return self
+
+
+class MemoryConfirmationDecision(BaseModel):
+    """One decision for a schema-validated long-term-memory candidate."""
+
+    candidate_id: str = Field(min_length=1, max_length=128)
+    action: Literal["use", "edit", "ignore"]
+    option_id: str | None = Field(default=None, max_length=128)
+    custom_answer: str | None = Field(default=None, max_length=2_000)
+
+    @model_validator(mode="after")
+    def validate_edit_payload(self) -> MemoryConfirmationDecision:
+        if self.action != "edit":
+            if self.option_id is not None or self.custom_answer is not None:
+                raise ValueError("Only edit decisions may include an edited value")
+            return self
+        if not self.option_id:
+            raise ValueError("option_id is required for an edit decision")
+        if self.option_id == "other" and not (self.custom_answer or "").strip():
+            raise ValueError("custom_answer is required for an 'other' edit")
+        if self.option_id != "other" and self.custom_answer is not None:
+            raise ValueError("custom_answer is only valid for an 'other' edit")
+        return self
+
+
+class MemoryConfirmationSubmission(BaseModel):
+    decisions: list[MemoryConfirmationDecision] = Field(min_length=1, max_length=3)
+
+    @model_validator(mode="after")
+    def reject_duplicate_candidates(self) -> MemoryConfirmationSubmission:
+        ids = [decision.candidate_id for decision in self.decisions]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Each memory candidate may be decided only once")
         return self
 
 

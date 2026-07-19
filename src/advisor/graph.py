@@ -12,6 +12,7 @@ from advisor.nodes import (
     analyze_turn_node,
     build_filter_node,
     collect_clarification_node,
+    collect_memory_confirmation_node,
     compose_response_node,
     conversation_response_node,
     extract_need_profile_node,
@@ -19,7 +20,10 @@ from advisor.nodes import (
     plan_execution_node,
     placeholder_response_node,
     prepare_turn_node,
+    project_memory_node,
+    queue_memory_write_node,
     rank_candidates_node,
+    recall_memory_node,
     retrieve_candidates_node,
 )
 from advisor.schemas import ApplicationSettings, ExecutionMode, TurnAction
@@ -61,6 +65,17 @@ def _route_clarification(state: AdvisorState) -> str:
     return "continue"
 
 
+def _route_memory_confirmation(state: AdvisorState) -> str:
+    memory_context = state.get("memory_context") or {}
+    confirmation = memory_context.get("confirmation") or {}
+    if (
+        confirmation.get("status") == "pending"
+        and memory_context.get("decision_candidates")
+    ):
+        return "interrupt"
+    return "continue"
+
+
 def _route_execution(state: AdvisorState) -> str:
     mode = state.get("conversation", {}).get("execution_mode")
     if mode == ExecutionMode.REUSE.value:
@@ -76,6 +91,7 @@ def build_graph(
     checkpointer: Any | None = None,
     llm: Any | None = None,
     qdrant_client: Any | None = None,
+    memory_client: Any | None = None,
     category_registry: CategoryRegistry | None = None,
     guardrail_engine: GuardrailEngine | None = None,
 ) -> CompiledStateGraph:
@@ -91,13 +107,19 @@ def build_graph(
         settings=settings or ApplicationSettings(),
         llm=llm,
         qdrant_client=qdrant_client,
+        memory_client=memory_client,
         category_registry=category_registry or build_default_registry(),
         guardrail_engine=guardrail_engine,
     )
     builder = StateGraph(AdvisorState)
-    builder.add_node("prepare_turn", prepare_turn_node)
+    builder.add_node(
+        "prepare_turn", partial(prepare_turn_node, advisor_runtime=runtime)
+    )
     builder.add_node(
         "analyze_turn", partial(analyze_turn_node, advisor_runtime=runtime)
+    )
+    builder.add_node(
+        "recall_memory", partial(recall_memory_node, advisor_runtime=runtime)
     )
     builder.add_node(
         "extract_need", partial(extract_need_profile_node, advisor_runtime=runtime)
@@ -105,6 +127,13 @@ def build_graph(
     builder.add_node(
         "generate_clarification",
         partial(generate_clarification_node, advisor_runtime=runtime),
+    )
+    builder.add_node(
+        "project_memory", partial(project_memory_node, advisor_runtime=runtime)
+    )
+    builder.add_node(
+        "collect_memory_confirmation",
+        partial(collect_memory_confirmation_node, advisor_runtime=runtime),
     )
     builder.add_node(
         "collect_clarification",
@@ -128,11 +157,16 @@ def build_graph(
     )
     builder.add_node("conversation_response", conversation_response_node)
     builder.add_node("placeholder_response", placeholder_response_node)
+    builder.add_node(
+        "queue_memory_write",
+        partial(queue_memory_write_node, advisor_runtime=runtime),
+    )
 
     builder.add_edge(START, "prepare_turn")
     builder.add_edge("prepare_turn", "analyze_turn")
+    builder.add_edge("analyze_turn", "recall_memory")
     builder.add_conditional_edges(
-        "analyze_turn",
+        "recall_memory",
         _route_turn,
         {
             "extract": "extract_need",
@@ -141,7 +175,16 @@ def build_graph(
             "placeholder": "placeholder_response",
         },
     )
-    builder.add_edge("extract_need", "generate_clarification")
+    builder.add_edge("extract_need", "project_memory")
+    builder.add_conditional_edges(
+        "project_memory",
+        _route_memory_confirmation,
+        {
+            "interrupt": "collect_memory_confirmation",
+            "continue": "generate_clarification",
+        },
+    )
+    builder.add_edge("collect_memory_confirmation", "generate_clarification")
     builder.add_conditional_edges(
         "generate_clarification",
         _route_clarification,
@@ -160,7 +203,8 @@ def build_graph(
     builder.add_edge("build_filter", "retrieve_candidates")
     builder.add_edge("retrieve_candidates", "rank_candidates")
     builder.add_edge("rank_candidates", "compose_response")
-    builder.add_edge("compose_response", END)
-    builder.add_edge("conversation_response", END)
-    builder.add_edge("placeholder_response", END)
+    builder.add_edge("compose_response", "queue_memory_write")
+    builder.add_edge("conversation_response", "queue_memory_write")
+    builder.add_edge("placeholder_response", "queue_memory_write")
+    builder.add_edge("queue_memory_write", END)
     return builder.compile(checkpointer=checkpointer or InMemorySaver())

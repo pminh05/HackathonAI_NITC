@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Literal
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -18,6 +18,12 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 from pydantic import BaseModel, Field, model_validator
 
+from advisor.auth import (
+    AuthenticatedUser,
+    AuthenticationServiceUnavailable,
+    InvalidAccessToken,
+    SupabaseAuthenticator,
+)
 from advisor.categories.registry import CategoryRegistry, build_default_registry
 from advisor.graph import build_graph
 from advisor.guardrails import (
@@ -26,13 +32,23 @@ from advisor.guardrails import (
     SAFE_OUTPUT_FALLBACK,
     StreamingOutputGuard,
 )
+from advisor.memory.mem0 import (
+    Mem0Error,
+    Mem0Memory,
+    Mem0NotFound,
+    event_added_count,
+)
 from advisor.persistence.checkpointer import open_async_checkpointer
 from advisor.retrieval.qdrant import (
     AdvisorConfigurationError,
     create_qdrant_client,
     find_missing_indexes,
 )
-from advisor.schemas import ApplicationSettings, ClarificationAnswer
+from advisor.schemas import (
+    ApplicationSettings,
+    ClarificationAnswer,
+    MemoryConfirmationDecision,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -52,6 +68,10 @@ PUBLIC_PROGRESS_STAGES = {
     "filter_built",
     "retrieval_completed",
     "ranking_completed",
+    "memory_recalled",
+    "memory_projected",
+    "memory_confirmed",
+    "memory_write_queued",
 }
 
 
@@ -68,22 +88,43 @@ class ChatRequest(BaseModel):
 
 
 class ResumeRequest(BaseModel):
-    answers: list[ClarificationAnswer] = Field(min_length=1, max_length=3)
+    kind: Literal["clarification", "memory_confirmation"] | None = None
+    answers: list[ClarificationAnswer] = Field(default_factory=list, max_length=3)
+    decisions: list[MemoryConfirmationDecision] = Field(
+        default_factory=list, max_length=3
+    )
 
     @model_validator(mode="after")
-    def reject_duplicate_questions(self) -> ResumeRequest:
+    def validate_resume_kind(self) -> ResumeRequest:
+        if self.kind is None:
+            self.kind = "memory_confirmation" if self.decisions else "clarification"
+        if self.kind == "clarification":
+            if not self.answers or self.decisions:
+                raise ValueError("clarification resumes require answers only")
+        elif not self.decisions or self.answers:
+            raise ValueError("memory_confirmation resumes require decisions only")
         ids = [answer.question_id for answer in self.answers]
         if len(ids) != len(set(ids)):
             raise ValueError("Each clarification question may be answered only once")
+        candidate_ids = [decision.candidate_id for decision in self.decisions]
+        if len(candidate_ids) != len(set(candidate_ids)):
+            raise ValueError("Each memory candidate may be decided only once")
         return self
 
 
 class ThreadStatusResponse(BaseModel):
     thread_id: UUID
-    status: Literal["running", "waiting_for_clarification", "completed"]
+    status: Literal[
+        "running",
+        "waiting_for_clarification",
+        "waiting_for_memory_confirmation",
+        "completed",
+    ]
     questions: list[dict[str, Any]] = Field(default_factory=list)
+    memory_confirmation: dict[str, Any] | None = None
     answer: str | None = None
     selected_products: list[dict[str, Any]] = Field(default_factory=list)
+    memory_write: dict[str, Any] | None = None
 
 
 class ThreadRunRegistry:
@@ -117,6 +158,14 @@ def _json_default(value: Any) -> Any:
     if hasattr(value, "value"):
         return value.value
     return str(value)
+
+
+def _configured_secret(value: Any) -> bool:
+    if value is None:
+        return False
+    getter = getattr(value, "get_secret_value", None)
+    raw = getter() if callable(getter) else value
+    return bool(str(raw).strip())
 
 
 def encode_sse(event: str, data: dict[str, Any]) -> str:
@@ -196,6 +245,22 @@ def _is_waiting(values: dict[str, Any]) -> bool:
     )
 
 
+def _is_waiting_for_memory(values: dict[str, Any]) -> bool:
+    memory_context = values.get("memory_context") or {}
+    confirmation = memory_context.get("confirmation") or {}
+    return confirmation.get("status") == "pending" and bool(
+        memory_context.get("decision_candidates")
+    )
+
+
+def _is_completed(values: dict[str, Any]) -> bool:
+    return (values.get("control") or {}).get("stage") in {
+        "completed",
+        "memory_write_queued",
+        "memory_write_failed",
+    }
+
+
 def _public_questions(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Hide options removed from the current clarification contract."""
     return [
@@ -211,15 +276,60 @@ def _public_questions(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _public_memory_confirmation(values: dict[str, Any]) -> dict[str, Any] | None:
+    if not _is_waiting_for_memory(values):
+        return None
+    memory_context = values.get("memory_context") or {}
+    confirmation = memory_context.get("confirmation") or {}
+    candidates = _public_memory_candidates(
+        memory_context.get("decision_candidates") or []
+    )
+    return {
+        "message": confirmation.get("message", ""),
+        "category": confirmation.get("category"),
+        "candidates": candidates,
+    }
+
+
+def _public_memory_candidates(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            key: item.get(key)
+            for key in (
+                "candidate_id",
+                "question_id",
+                "question",
+                "display_value",
+                "options",
+                "sources",
+            )
+        }
+        for item in values
+    ]
+
+
+def _public_memory_write(values: dict[str, Any]) -> dict[str, Any] | None:
+    write = (values.get("memory_context") or {}).get("write")
+    if not isinstance(write, dict):
+        return None
+    status = str(write.get("status") or "skipped")
+    return {
+        "status": status if status in {"skipped", "queued", "failed"} else "failed",
+        "event_id": str(write["event_id"]) if write.get("event_id") else None,
+    }
+
+
 def _status_from_values(
     thread_id: UUID, values: dict[str, Any], *, running: bool
 ) -> ThreadStatusResponse:
     clarification = values.get("clarification") or {}
     if running:
         status = "running"
+    elif _is_waiting_for_memory(values):
+        status = "waiting_for_memory_confirmation"
     elif _is_waiting(values):
         status = "waiting_for_clarification"
-    elif (values.get("control") or {}).get("stage") == "completed":
+    elif _is_completed(values):
         status = "completed"
     else:
         status = "running"
@@ -231,8 +341,10 @@ def _status_from_values(
             if _is_waiting(values)
             else []
         ),
+        memory_confirmation=_public_memory_confirmation(values),
         answer=(values.get("response") or {}).get("answer"),
         selected_products=(values.get("ranking") or {}).get("selected_products", []),
+        memory_write=_public_memory_write(values),
     )
 
 
@@ -272,6 +384,134 @@ def _validate_answers(values: dict[str, Any], submission: ResumeRequest) -> None
                 "invalid": invalid,
             },
         )
+
+
+def _validate_memory_decisions(
+    values: dict[str, Any], submission: ResumeRequest
+) -> None:
+    memory_context = values.get("memory_context") or {}
+    candidates = {
+        str(item.get("candidate_id")): item
+        for item in memory_context.get("decision_candidates") or []
+    }
+    expected = set(candidates)
+    received = {decision.candidate_id for decision in submission.decisions}
+    if received != expected:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_memory_decisions",
+                "message": "Decisions must match every pending memory candidate.",
+                "missing": sorted(expected - received),
+                "unexpected": sorted(received - expected),
+            },
+        )
+    invalid: list[dict[str, str]] = []
+    for decision in submission.decisions:
+        if decision.action != "edit":
+            continue
+        allowed = {
+            str(option.get("option_id"))
+            for option in candidates[decision.candidate_id].get("options") or []
+        }
+        if decision.option_id not in allowed:
+            invalid.append(
+                {
+                    "candidate_id": decision.candidate_id,
+                    "option_id": str(decision.option_id),
+                }
+            )
+    if invalid:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_memory_options",
+                "message": "One or more edited options are not in the category catalog.",
+                "invalid": invalid,
+            },
+        )
+
+
+async def _request_identity(request: Request) -> dict[str, Any]:
+    authorization = request.headers.get("Authorization")
+    if authorization is None:
+        return {"authenticated": False, "user_id": None}
+    scheme, separator, token = authorization.partition(" ")
+    if not separator or scheme.casefold() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="Invalid Authorization header")
+    authenticator = getattr(request.app.state, "authenticator", None)
+    if authenticator is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Supabase authentication is not configured",
+        )
+    try:
+        user = await authenticator.verify(token.strip())
+    except InvalidAccessToken as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired access token") from exc
+    except AuthenticationServiceUnavailable as exc:
+        raise HTTPException(
+            status_code=503, detail="Authentication service unavailable"
+        ) from exc
+    if isinstance(user, AuthenticatedUser):
+        return user.as_identity()
+    if isinstance(user, dict):
+        raw_user_id = user.get("user_id") or user.get("id") or user.get("sub")
+        try:
+            user_id = str(UUID(str(raw_user_id)))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise HTTPException(status_code=401, detail="Invalid authenticated user") from exc
+        return {
+            "authenticated": True,
+            "user_id": user_id,
+        }
+    raise HTTPException(status_code=401, detail="Invalid authenticated user")
+
+
+def _assert_thread_owner(values: dict[str, Any], identity: dict[str, Any]) -> None:
+    owner = values.get("identity") or {}
+    owner_authenticated = bool(owner.get("authenticated") and owner.get("user_id"))
+    caller_authenticated = bool(
+        identity.get("authenticated") and identity.get("user_id")
+    )
+    matches = (
+        owner_authenticated
+        and caller_authenticated
+        and str(owner.get("user_id")) == str(identity.get("user_id"))
+    ) or (not owner_authenticated and not caller_authenticated)
+    if not matches:
+        # Do not reveal whether an authenticated thread exists.
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+
+def _require_authenticated(identity: dict[str, Any]) -> str:
+    if not identity.get("authenticated") or not identity.get("user_id"):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return str(identity["user_id"])
+
+
+def _memory_service(app: FastAPI) -> Any:
+    client = getattr(app.state, "memory_client", None)
+    if not app.state.settings.memory_enabled or client is None:
+        raise HTTPException(status_code=503, detail="Long-term memory is disabled")
+    return client
+
+
+def _sanitized_memory(item: dict[str, Any]) -> dict[str, Any]:
+    metadata = item.get("metadata") or {}
+    allowed_metadata = {
+        key: metadata.get(key)
+        for key in ("thread_id", "turn_id", "active_category", "prompt_version")
+        if metadata.get(key) is not None
+    }
+    return {
+        "id": str(item.get("id") or ""),
+        "memory": str(item.get("memory") or ""),
+        "categories": [str(value) for value in item.get("categories") or []],
+        "metadata": allowed_metadata,
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+    }
 
 
 def _recent_human_text(values: dict[str, Any], *, limit: int = 12) -> list[str]:
@@ -376,16 +616,29 @@ async def _stream_graph(
                 interrupt_payload = _find_interrupt_payload(data)
                 if interrupt_payload:
                     terminal_emitted = True
-                    yield encode_sse(
-                        "clarification_required",
-                        {
-                            "thread_id": thread_id,
-                            "message": interrupt_payload.get("message", ""),
-                            "questions": _public_questions(
-                                interrupt_payload.get("questions", [])
-                            ),
-                        },
-                    )
+                    if interrupt_payload.get("type") == "memory_confirmation_required":
+                        yield encode_sse(
+                            "memory_confirmation_required",
+                            {
+                                "thread_id": thread_id,
+                                "message": interrupt_payload.get("message", ""),
+                                "category": interrupt_payload.get("category"),
+                                "candidates": _public_memory_candidates(
+                                    interrupt_payload.get("candidates", [])
+                                ),
+                            },
+                        )
+                    else:
+                        yield encode_sse(
+                            "clarification_required",
+                            {
+                                "thread_id": thread_id,
+                                "message": interrupt_payload.get("message", ""),
+                                "questions": _public_questions(
+                                    interrupt_payload.get("questions", [])
+                                ),
+                            },
+                        )
 
         trailing = output_guard.finish()
         if trailing:
@@ -394,7 +647,14 @@ async def _stream_graph(
         if not terminal_emitted:
             snapshot = await _get_snapshot(app, thread_id)
             values = dict(snapshot.values)
-            if _is_waiting(values):
+            if _is_waiting_for_memory(values):
+                terminal_emitted = True
+                payload = _public_memory_confirmation(values) or {}
+                yield encode_sse(
+                    "memory_confirmation_required",
+                    {"thread_id": thread_id, **payload},
+                )
+            elif _is_waiting(values):
                 terminal_emitted = True
                 yield encode_sse(
                     "clarification_required",
@@ -406,15 +666,17 @@ async def _stream_graph(
                         ),
                     },
                 )
-            elif (values.get("control") or {}).get("stage") == "completed":
+            elif _is_completed(values):
                 terminal_emitted = True
                 answer, selected_products = _safe_public_result(app, values)
+                memory_write = _public_memory_write(values)
                 yield encode_sse(
                     "completed",
                     {
                         "thread_id": thread_id,
                         "answer": answer,
                         "selected_products": selected_products,
+                        **({"memory_write": memory_write} if memory_write else {}),
                     },
                 )
         if not terminal_emitted:
@@ -479,6 +741,8 @@ def create_app(
     graph: Any | None = None,
     llm: Any | None = None,
     qdrant_client: Any | None = None,
+    memory_client: Any | None = None,
+    authenticator: Any | None = None,
     category_registry: CategoryRegistry | None = None,
     validate_services: bool = True,
 ) -> FastAPI:
@@ -493,58 +757,109 @@ def create_app(
             mode=app_settings.guardrail_mode
         )
         application.state.ready = False
-        if graph is not None:
-            application.state.graph = graph
-            application.state.ready = True
-            yield
-            application.state.ready = False
-            return
-
-        if llm is None and not (
-            app_settings.google_api_key or app_settings.fpt_api_key
+        resolved_authenticator = authenticator
+        resolved_memory = memory_client
+        owns_authenticator = False
+        owns_memory = False
+        if (
+            resolved_authenticator is None
+            and (app_settings.supabase_url or "").strip()
+            and _configured_secret(app_settings.supabase_publishable_key)
         ):
-            raise AdvisorConfigurationError("GOOGLE_API_KEY or FPT_API_KEY is required")
-        client = qdrant_client or create_qdrant_client(app_settings)
-        owns_client = qdrant_client is None
-        resolved_registry = category_registry or build_default_registry()
-        resolved_registry.validate_all()
-        try:
-            if validate_services:
-                for category, definition in resolved_registry.all().items():
-                    if not definition.implemented:
-                        continue
-                    spec = resolved_registry.get_spec(category)
-                    missing = await asyncio.to_thread(
-                        find_missing_indexes,
-                        client,
-                        spec.config["collection"],
-                        spec.config["payload_indexes"],
-                    )
-                    if missing:
-                        hint = (
-                            f" Run `{spec.setup_indexes_command}`."
-                            if spec.setup_indexes_command
-                            else ""
-                        )
-                        raise AdvisorConfigurationError(
-                            f"Qdrant category {category!r} is missing payload "
-                            f"indexes: {', '.join(sorted(missing))}.{hint}"
-                        )
-            async with open_async_checkpointer(app_settings) as checkpointer:
-                application.state.graph = build_graph(
-                    settings=app_settings,
-                    checkpointer=checkpointer,
-                    llm=llm,
-                    qdrant_client=client,
-                    category_registry=resolved_registry,
-                    guardrail_engine=application.state.guardrail_engine,
+            resolved_authenticator = SupabaseAuthenticator(
+                supabase_url=app_settings.supabase_url,
+                publishable_key=app_settings.supabase_publishable_key.get_secret_value(),
+                timeout_seconds=app_settings.supabase_auth_timeout_seconds,
+            )
+            owns_authenticator = True
+        if resolved_memory is None and app_settings.memory_enabled:
+            if _configured_secret(app_settings.mem0_api_key):
+                resolved_memory = Mem0Memory(
+                    api_key=app_settings.mem0_api_key,
+                    base_url=app_settings.mem0_base_url,
+                    top_k=app_settings.mem0_search_top_k,
+                    threshold=app_settings.mem0_search_threshold,
+                    timeout_seconds=app_settings.mem0_search_timeout_seconds,
                 )
+                owns_memory = True
+        if app_settings.memory_enabled:
+            missing: list[str] = []
+            if resolved_memory is None:
+                missing.append("MEM0_API_KEY")
+            if resolved_authenticator is None:
+                missing.extend(["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY"])
+            if missing:
+                raise AdvisorConfigurationError(
+                    "Memory is enabled but configuration is missing: "
+                    + ", ".join(missing)
+                )
+        application.state.authenticator = resolved_authenticator
+        application.state.memory_client = resolved_memory
+        try:
+            if graph is not None:
+                application.state.graph = graph
                 application.state.ready = True
                 yield
                 application.state.ready = False
+                return
+
+            if llm is None and not (
+                app_settings.google_api_key or app_settings.fpt_api_key
+            ):
+                raise AdvisorConfigurationError(
+                    "GOOGLE_API_KEY or FPT_API_KEY is required"
+                )
+            client = qdrant_client or create_qdrant_client(app_settings)
+            owns_client = qdrant_client is None
+            resolved_registry = category_registry or build_default_registry()
+            resolved_registry.validate_all()
+            try:
+                if validate_services:
+                    for category, definition in resolved_registry.all().items():
+                        if not definition.implemented:
+                            continue
+                        spec = resolved_registry.get_spec(category)
+                        missing_indexes = await asyncio.to_thread(
+                            find_missing_indexes,
+                            client,
+                            spec.config["collection"],
+                            spec.config["payload_indexes"],
+                        )
+                        if missing_indexes:
+                            hint = (
+                                f" Run `{spec.setup_indexes_command}`."
+                                if spec.setup_indexes_command
+                                else ""
+                            )
+                            raise AdvisorConfigurationError(
+                                f"Qdrant category {category!r} is missing payload "
+                                f"indexes: {', '.join(sorted(missing_indexes))}.{hint}"
+                            )
+                async with open_async_checkpointer(app_settings) as checkpointer:
+                    application.state.graph = build_graph(
+                        settings=app_settings,
+                        checkpointer=checkpointer,
+                        llm=llm,
+                        qdrant_client=client,
+                        memory_client=resolved_memory,
+                        category_registry=resolved_registry,
+                        guardrail_engine=application.state.guardrail_engine,
+                    )
+                    application.state.ready = True
+                    yield
+                    application.state.ready = False
+            finally:
+                if owns_client and hasattr(client, "close"):
+                    client.close()
         finally:
-            if owns_client and hasattr(client, "close"):
-                client.close()
+            if owns_memory and resolved_memory is not None:
+                close = getattr(resolved_memory, "aclose", None)
+                if callable(close):
+                    await close()
+            if owns_authenticator and resolved_authenticator is not None:
+                close = getattr(resolved_authenticator, "aclose", None)
+                if callable(close):
+                    await close()
 
     application = FastAPI(
         title="Product Advisor API",
@@ -555,8 +870,8 @@ def create_app(
         CORSMiddleware,
         allow_origins=app_settings.cors_origins,
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Content-Type"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization"],
     )
     if PUBLIC_IMAGE_DIR.is_dir():
         application.mount(
@@ -580,12 +895,14 @@ def create_app(
     async def get_chat_status(
         thread_id: UUID, request: Request
     ) -> ThreadStatusResponse:
+        identity = await _request_identity(request)
         thread_key = str(thread_id)
         running = await request.app.state.thread_registry.is_running(thread_key)
         snapshot = await _get_snapshot(request.app, thread_key)
-        if not running and not _snapshot_exists(snapshot):
+        if not _snapshot_exists(snapshot):
             raise HTTPException(status_code=404, detail="Thread not found")
-        values = dict(snapshot.values) if _snapshot_exists(snapshot) else {}
+        values = dict(snapshot.values)
+        _assert_thread_owner(values, identity)
         status = _status_from_values(thread_id, values, running=running)
         if status.status == "completed":
             answer, selected_products = _safe_public_result(request.app, values)
@@ -595,6 +912,7 @@ def create_app(
 
     @application.post("/chat", responses=sse_response_docs)
     async def chat(payload: ChatRequest, request: Request) -> StreamingResponse:
+        identity = await _request_identity(request)
         _enforce_request_guardrail(request.app, payload.message, surface="chat_message")
         thread_uuid = payload.thread_id or uuid4()
         thread_key = str(thread_uuid)
@@ -608,12 +926,13 @@ def create_app(
                 if not _snapshot_exists(snapshot):
                     raise HTTPException(status_code=404, detail="Thread not found")
                 values = dict(snapshot.values)
-                if _is_waiting(values):
+                _assert_thread_owner(values, identity)
+                if _is_waiting(values) or _is_waiting_for_memory(values):
                     raise HTTPException(
                         status_code=409,
-                        detail="Thread is waiting for clarification answers",
+                        detail="Thread is waiting for structured answers",
                     )
-                if (values.get("control") or {}).get("stage") != "completed":
+                if not _is_completed(values):
                     raise HTTPException(status_code=409, detail="Thread is not ready")
                 _enforce_request_guardrail(
                     request.app,
@@ -624,7 +943,10 @@ def create_app(
             return _streaming_response(
                 _stream_graph(
                     request=request,
-                    graph_input={"messages": [HumanMessage(content=payload.message)]},
+                    graph_input={
+                        "messages": [HumanMessage(content=payload.message)],
+                        "identity": identity,
+                    },
                     thread_id=thread_key,
                     session_mode=mode,
                 )
@@ -637,11 +959,17 @@ def create_app(
     async def resume_chat(
         thread_id: UUID, payload: ResumeRequest, request: Request
     ) -> StreamingResponse:
+        identity = await _request_identity(request)
         custom_answers = [
             (answer.custom_answer or "").strip()
             for answer in payload.answers
             if answer.option_id == "other"
         ]
+        custom_answers.extend(
+            (decision.custom_answer or "").strip()
+            for decision in payload.decisions
+            if decision.action == "edit" and decision.option_id == "other"
+        )
         if custom_answers:
             _enforce_request_guardrail(
                 request.app,
@@ -657,10 +985,21 @@ def create_app(
             if not _snapshot_exists(snapshot):
                 raise HTTPException(status_code=404, detail="Thread not found")
             values = dict(snapshot.values)
-            if not _is_waiting(values):
+            _assert_thread_owner(values, identity)
+            waiting_for_clarification = _is_waiting(values)
+            waiting_for_memory = _is_waiting_for_memory(values)
+            expected_kind = (
+                "memory_confirmation" if waiting_for_memory else "clarification"
+            )
+            if not (waiting_for_clarification or waiting_for_memory):
                 raise HTTPException(
                     status_code=409,
-                    detail="Thread is not waiting for clarification",
+                    detail="Thread is not waiting for structured answers",
+                )
+            if payload.kind != expected_kind:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Thread is waiting for {expected_kind}",
                 )
             if custom_answers:
                 _enforce_request_guardrail(
@@ -668,14 +1007,26 @@ def create_app(
                     "\n".join([*_recent_human_text(values), *custom_answers]),
                     surface="conversation_input",
                 )
-            _validate_answers(values, payload)
-            command = Command(
-                resume={
-                    "answers": [
-                        answer.model_dump(mode="json") for answer in payload.answers
-                    ]
-                }
-            )
+            if payload.kind == "memory_confirmation":
+                _validate_memory_decisions(values, payload)
+                command = Command(
+                    resume={
+                        "decisions": [
+                            decision.model_dump(mode="json", exclude_none=True)
+                            for decision in payload.decisions
+                        ]
+                    }
+                )
+            else:
+                _validate_answers(values, payload)
+                command = Command(
+                    resume={
+                        "answers": [
+                            answer.model_dump(mode="json")
+                            for answer in payload.answers
+                        ]
+                    }
+                )
             return _streaming_response(
                 _stream_graph(
                     request=request,
@@ -687,6 +1038,108 @@ def create_app(
         except Exception:
             await registry.release(thread_key)
             raise
+
+    @application.get("/chat/{thread_id}/memory-write")
+    async def get_memory_write_status(
+        thread_id: UUID, request: Request
+    ) -> dict[str, Any]:
+        identity = await _request_identity(request)
+        _require_authenticated(identity)
+        thread_key = str(thread_id)
+        snapshot = await _get_snapshot(request.app, thread_key)
+        if not _snapshot_exists(snapshot):
+            raise HTTPException(status_code=404, detail="Thread not found")
+        values = dict(snapshot.values)
+        _assert_thread_owner(values, identity)
+        write = _public_memory_write(values) or {"status": "skipped", "event_id": None}
+        if write["status"] != "queued" or not write.get("event_id"):
+            return {**write, "added_count": 0}
+        memory = _memory_service(request.app)
+        try:
+            event = await memory.get_event(str(write["event_id"]))
+        except (Mem0Error, asyncio.TimeoutError):
+            logger.warning("Could not poll Mem0 event %s", write["event_id"], exc_info=True)
+            return {
+                "status": "failed",
+                "event_id": write["event_id"],
+                "added_count": 0,
+            }
+        event_status = str(event.get("status") or "PENDING").upper()
+        status = {
+            "SUCCEEDED": "succeeded",
+            "COMPLETED": "succeeded",
+            "FAILED": "failed",
+            "ERROR": "failed",
+            "PENDING": "pending",
+            "RUNNING": "pending",
+        }.get(event_status, "pending")
+        return {
+            "status": status,
+            "event_id": write["event_id"],
+            "added_count": event_added_count(event) if status == "succeeded" else 0,
+        }
+
+    @application.get("/me/memories")
+    async def list_my_memories(
+        request: Request,
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=50, ge=1, le=200),
+    ) -> dict[str, Any]:
+        identity = await _request_identity(request)
+        user_id = _require_authenticated(identity)
+        memory = _memory_service(request.app)
+        try:
+            result = await memory.list_memories(
+                user_id=user_id, page=page, page_size=page_size
+            )
+        except Mem0Error as exc:
+            raise HTTPException(
+                status_code=502, detail="Could not load long-term memories"
+            ) from exc
+        return {
+            "count": int(result.get("count") or 0),
+            "page": page,
+            "page_size": page_size,
+            "next": result.get("next"),
+            "previous": result.get("previous"),
+            "results": [
+                _sanitized_memory(item) for item in result.get("results") or []
+            ],
+        }
+
+    @application.delete("/me/memories/{memory_id}")
+    async def delete_my_memory(memory_id: UUID, request: Request) -> dict[str, bool]:
+        identity = await _request_identity(request)
+        user_id = _require_authenticated(identity)
+        memory = _memory_service(request.app)
+        try:
+            item = await memory.get_memory(str(memory_id))
+        except Mem0NotFound as exc:
+            raise HTTPException(status_code=404, detail="Memory not found") from exc
+        except Mem0Error as exc:
+            raise HTTPException(status_code=502, detail="Could not verify memory") from exc
+        if str(item.get("user_id") or "") != user_id:
+            raise HTTPException(status_code=404, detail="Memory not found")
+        try:
+            await memory.delete_memory(str(memory_id))
+        except Mem0NotFound as exc:
+            raise HTTPException(status_code=404, detail="Memory not found") from exc
+        except Mem0Error as exc:
+            raise HTTPException(status_code=502, detail="Could not delete memory") from exc
+        return {"deleted": True}
+
+    @application.delete("/me/memories")
+    async def delete_all_my_memories(request: Request) -> dict[str, bool]:
+        identity = await _request_identity(request)
+        user_id = _require_authenticated(identity)
+        memory = _memory_service(request.app)
+        try:
+            await memory.delete_all(user_id=user_id)
+        except Mem0Error as exc:
+            raise HTTPException(
+                status_code=502, detail="Could not delete long-term memories"
+            ) from exc
+        return {"deleted": True}
 
     return application
 

@@ -1,6 +1,6 @@
 # Product Advisor
 
-AI chatbot tư vấn và so sánh sản phẩm theo nhu cầu thực tế của khách hàng. Hệ thống sử dụng LangGraph để quản lý luồng hội thoại, Human-in-the-loop để thu thập thông tin còn thiếu và Qdrant để truy xuất sản phẩm theo từng ngành hàng.
+AI chatbot tư vấn và so sánh sản phẩm theo nhu cầu thực tế của khách hàng. Hệ thống sử dụng LangGraph để quản lý luồng hội thoại, Human-in-the-loop để thu thập thông tin còn thiếu, Qdrant để truy xuất sản phẩm và Mem0 để cá nhân hóa xuyên phiên cho người dùng đã đăng nhập.
 
 Phiên bản hiện tại triển khai đầy đủ cho **tủ lạnh**, **máy lạnh**, **máy giặt**,
 **máy sấy quần áo**, **máy rửa chén**, **tủ mát**, **tủ đông**,
@@ -20,6 +20,7 @@ Tài liệu HTTP API, SSE và Human-in-the-loop: [docs/API.md](docs/API.md).
   `microkaraoke`, `microthuamdienthoai`, `donghothongminh`, `maytinhdeban`,
   `maytinhbang` và `mayin`. Các collection đã chứa dữ liệu sản phẩm.
 - npm đi kèm Node.js.
+- Để bật cá nhân hóa: một Mem0 Platform API key và một Supabase project có tài khoản demo email/password.
 
 Backend và frontend chạy thành hai process riêng:
 
@@ -112,15 +113,32 @@ API_PORT=8000
 API_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 SSE_HEARTBEAT_SECONDS=15
 GUARDRAIL_MODE=enforce
-GUARDRAIL_OUTPUT_HOLDBACK_CHARS=64
+GUARDRAIL_OUTPUT_HOLDBACK_CHARS=16
 ```
 
 Guardrail prompt-injection chạy hoàn toàn trong process: không thêm model call,
 network hop hay Qdrant query. Input, lịch sử, custom clarification answer và
 candidate lấy từ Qdrant đều được scan bằng pattern đã compile; model prompt
-được tách thành system policy và task data. Output SSE giữ lại 64 ký tự cuối để
+được tách thành system policy và task data. Output SSE giữ lại số ký tự cuối đã cấu hình để
 phát hiện pattern đi qua ranh giới token trước khi nội dung được gửi ra client.
 `GUARDRAIL_MODE=observe` chỉ nên dùng tạm thời để đo false positive.
+
+Để bật hồ sơ xuyên phiên, cấu hình đầy đủ các biến sau ở backend. Startup sẽ từ
+chối chạy nếu `MEMORY_ENABLED=true` nhưng thiếu Mem0 hoặc Supabase config:
+
+```dotenv
+MEMORY_ENABLED=true
+MEM0_API_KEY=your-server-only-mem0-key
+MEM0_BASE_URL=https://api.mem0.ai
+MEM0_SEARCH_TOP_K=10
+MEM0_SEARCH_THRESHOLD=0.2
+MEM0_SEARCH_TIMEOUT_SECONDS=3
+SUPABASE_URL=https://PROJECT_REF.supabase.co
+SUPABASE_PUBLISHABLE_KEY=your-publishable-key
+```
+
+`MEM0_API_KEY` chỉ đặt ở backend. Khi `MEMORY_ENABLED=false`, người dùng ẩn danh
+và toàn bộ luồng cũ tiếp tục hoạt động mà không gọi Mem0.
 
 Backend uses SQLite checkpoints by default. For a deployed Supabase/PostgreSQL
 backend, configure the Session pooler connection string instead:
@@ -235,6 +253,8 @@ Mở `http://localhost:5173`. Frontend mặc định gọi API qua cấu hình:
 
 ```dotenv
 VITE_API_BASE_URL=http://127.0.0.1:8000
+VITE_SUPABASE_URL=https://PROJECT_REF.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
 
 Nếu backend chạy ở địa chỉ khác, sửa `frontend/.env` rồi khởi động lại Vite.
@@ -271,18 +291,26 @@ không phải production server.
 ## Luồng xử lý
 
 ```text
-User message / clarification answer
+User message / memory confirmation / clarification answer
     ↓
 Analyze category, turn action and product references
+    ↓
+Recall user-scoped Mem0 facts (authenticated users only)
     ├── Detail / compare / explain → reuse recommendation context
     ├── More options → rerank unseen cached candidates
     └── New or changed needs → apply profile patch
+                                  ↓
+                            Project schema candidates
+                              ├── Có → memory confirmation HITL
+                              └── Không
                                   ↓
                             Re-check missing fields
                               ├── Còn thiếu → HITL form
                               └── Đủ → reuse / rerank / retrieve
                                                    ↓
                                       Grounded streamed response
+                                                   ↓
+                                  Queue inferred Mem0 write
 ```
 
 HITL đưa tối đa ba thông tin còn thiếu và yêu cầu trả lời đầy đủ form. Giao diện
@@ -295,8 +323,10 @@ State là working memory của một phiên tư vấn:
 
 ```text
 messages          Lịch sử đầy đủ của user và assistant
+identity          Supabase user UUID đã được server xác minh hoặc anonymous
+memory_context    Recall, style, candidates, confirmation và write event
 conversation      Active category, turn action và execution mode
-category_contexts Profile, clarification và recommendations riêng từng category
+category_contexts Profile, memory confirmation, clarification và recommendations riêng từng category
 need_profile      Projection tương thích của profile đang active
 clarification     Projection câu hỏi HITL hiện tại
 retrieval/ranking Kết quả của lượt hiện tại
@@ -327,10 +357,13 @@ Tiếp tục build filter và search
 - `user_id`: đại diện cho khách hàng.
 - `thread_id`: đại diện cho từng cuộc hội thoại.
 
-Long-term memory bằng Mem0 chưa được bật. Checkpoint chỉ là short-term memory của
-thread; recommendation cache và clarification không được thiết kế để đưa vào
-Mem0. Khi tích hợp sau này, thông tin khách vừa nói sẽ ưu tiên hơn thread context,
-và thread context ưu tiên hơn default từ Mem0.
+Mem0 là long-term memory theo Supabase `user_id`; checkpoint vẫn là working memory
+theo `thread_id`. Fact ảnh hưởng filter hoặc ranking chỉ được chiếu vào path do
+`CategorySpec.question_profile_paths` sở hữu và phải qua thẻ xác nhận một lần cho
+mỗi category/thread. Tên gọi và phong cách trả lời có thể dùng trực tiếp. Thứ tự
+ưu tiên là thông tin ở lượt hiện tại, profile đã xác nhận trong thread, gợi ý Mem0
+chưa xác nhận, rồi giá trị mặc định. Ngân sách và hard constraint chỉ được dùng lại
+khi memory có đúng ngành hàng.
 
 ## Qdrant collections
 
@@ -461,7 +494,8 @@ curl -N http://127.0.0.1:8000/chat \
   -d '{"message":"Tư vấn giúp tôi một chiếc tủ lạnh"}'
 ```
 
-Event `session` trả `thread_id`; nếu cần làm rõ, event cuối là `clarification_required`. Gửi toàn bộ câu trả lời bằng đúng thread đó:
+Event `session` trả `thread_id`; event cuối có thể là `memory_confirmation_required`
+hoặc `clarification_required`. Gửi toàn bộ lựa chọn bằng đúng thread đó:
 
 ```bash
 curl -N http://127.0.0.1:8000/chat/THREAD_ID/resume \
@@ -484,8 +518,11 @@ curl http://127.0.0.1:8000/chat/THREAD_ID
 Các endpoint:
 
 - `POST /chat`: tạo thread mới hoặc tiếp tục thread đã hoàn tất.
-- `POST /chat/{thread_id}/resume`: resume HITL.
-- `GET /chat/{thread_id}`: trạng thái, pending questions hoặc kết quả cuối.
+- `POST /chat/{thread_id}/resume`: resume clarification hoặc memory confirmation HITL.
+- `GET /chat/{thread_id}`: trạng thái, pending card/form hoặc kết quả cuối.
+- `GET /chat/{thread_id}/memory-write`: trạng thái extraction bất đồng bộ của Mem0.
+- `GET /me/memories`: danh sách memory của người dùng đã đăng nhập.
+- `DELETE /me/memories/{memory_id}` và `DELETE /me/memories`: quên một hoặc toàn bộ memory.
 - `GET /healthz`: health check nhẹ.
 
 ## Cấu trúc thư mục

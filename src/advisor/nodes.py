@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -13,14 +14,21 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from langchain_core.runnables import RunnableLambda
+from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.utils.json import parse_json_markdown
+from langgraph.config import get_config
 from langgraph.types import interrupt
 from pydantic import BaseModel
 
 from advisor.categories.base import CategorySpec, deserialize_filter, serialize_filter
 from advisor.categories.registry import CategoryRegistry, build_default_registry
 from advisor.guardrails import GuardrailEngine, SAFE_OUTPUT_FALLBACK
+from advisor.memory.mem0 import Mem0Memory
+from advisor.memory.projection import (
+    extract_response_preferences,
+    project_memories,
+    response_preferences_from_memories,
+)
 from advisor.retrieval.qdrant import (
     AdvisorConfigurationError,
     create_qdrant_client,
@@ -34,6 +42,7 @@ from advisor.schemas import (
     ClarificationSubmission,
     ExecutionMode,
     IntentLabel,
+    MemoryConfirmationSubmission,
     ProfilePatch,
     RankingResult,
     TurnAction,
@@ -868,6 +877,7 @@ class AdvisorRuntime:
     settings: ApplicationSettings = field(default_factory=ApplicationSettings)
     llm: Any | None = None
     qdrant_client: Any | None = None
+    memory_client: Any | None = None
     category_registry: CategoryRegistry = field(default_factory=build_default_registry)
     guardrail_engine: GuardrailEngine | None = None
     _qdrant_checked_categories: set[str] = field(default_factory=set)
@@ -886,6 +896,21 @@ class AdvisorRuntime:
         if self.qdrant_client is None:
             self.qdrant_client = create_qdrant_client(self.settings)
         return self.qdrant_client
+
+    def get_memory(self) -> Any | None:
+        if not self.settings.memory_enabled:
+            return None
+        if self.memory_client is None:
+            if self.settings.mem0_api_key is None:
+                return None
+            self.memory_client = Mem0Memory(
+                api_key=self.settings.mem0_api_key,
+                base_url=self.settings.mem0_base_url,
+                top_k=self.settings.mem0_search_top_k,
+                threshold=self.settings.mem0_search_threshold,
+                timeout_seconds=self.settings.mem0_search_timeout_seconds,
+            )
+        return self.memory_client
 
     def structured(self, schema: type[Any]) -> Any:
         return self.get_llm().with_structured_output(schema, method="json_schema")
@@ -1005,6 +1030,10 @@ def _fresh_category_context() -> dict[str, Any]:
             "questions": [],
             "resolved_fields": [],
         },
+        "memory_confirmation": {
+            "confirmed_question_ids": [],
+            "decisions": [],
+        },
         "recommendation_context": {
             "candidate_pool": [],
             "product_snapshots": {},
@@ -1048,6 +1077,10 @@ def _get_category_context(state: AdvisorState, category: str) -> dict[str, Any]:
         context.setdefault("profile_revision", 0)
         context.setdefault("clarification", _fresh_category_context()["clarification"])
         context.setdefault(
+            "memory_confirmation",
+            _fresh_category_context()["memory_confirmation"],
+        )
+        context.setdefault(
             "recommendation_context",
             _fresh_category_context()["recommendation_context"],
         )
@@ -1062,6 +1095,7 @@ def _get_category_context(state: AdvisorState, category: str) -> dict[str, Any]:
             "clarification": dict(
                 state.get("clarification") or _fresh_category_context()["clarification"]
             ),
+            "memory_confirmation": _fresh_category_context()["memory_confirmation"],
             "recommendation_context": _legacy_recommendation_context(state),
         }
     return _fresh_category_context()
@@ -1111,12 +1145,42 @@ def _recommendation_aliases(context: dict[str, Any]) -> list[dict[str, Any]]:
     return aliases
 
 
-def prepare_turn_node(state: AdvisorState) -> NodeUpdate:
+def prepare_turn_node(
+    state: AdvisorState, advisor_runtime: AdvisorRuntime
+) -> NodeUpdate:
     query = _latest_user_text(state)
     previous = state.get("conversation") or {}
     active = _active_category(state)
     turn_id = int(previous.get("turn_id") or 0) + 1
+    identity = dict(state.get("identity") or {})
+    authenticated = bool(identity.get("authenticated") and identity.get("user_id"))
+    memory_enabled = bool(advisor_runtime.settings.memory_enabled and authenticated)
+    previous_preferences = dict(
+        (state.get("memory_context") or {}).get("response_preferences") or {}
+    )
+    current_preferences = extract_response_preferences(query)
     update: NodeUpdate = {
+        "identity": {
+            "authenticated": authenticated,
+            "user_id": str(identity["user_id"]) if authenticated else None,
+        },
+        "memory_context": {
+            "enabled": memory_enabled,
+            "recalled": [],
+            "recall_status": "not_started" if memory_enabled else "skipped",
+            # Directly stated preferences remain working memory for this thread;
+            # a newer statement in the current turn takes precedence.
+            "response_preferences": {
+                **previous_preferences,
+                **current_preferences,
+            },
+            "decision_candidates": [],
+            "confirmation": {"status": "not_required"},
+            "write": {
+                "status": "not_started" if memory_enabled else "skipped",
+                "event_id": None,
+            },
+        },
         "conversation": {
             **previous,
             "active_category": active,
@@ -1136,6 +1200,7 @@ def prepare_turn_node(state: AdvisorState) -> NodeUpdate:
             "current_user_input": query,
             "input_kind": "message",
             "profile_changed_paths": [],
+            "memory_user_inputs": [query],
         },
     }
     if active:
@@ -1150,6 +1215,128 @@ def prepare_turn_node(state: AdvisorState) -> NodeUpdate:
     else:
         update["clarification"] = {"status": "not_checked", "round": 0}
     return update
+
+
+def _memory_search_query(state: AdvisorState, advisor_runtime: AdvisorRuntime) -> str:
+    category = _active_category(state)
+    category_name = (
+        advisor_runtime.get_category(category).display_name if category else "sản phẩm"
+    )
+    return (
+        f"Ngữ cảnh tư vấn hiện tại: {category_name}. "
+        f"Yêu cầu mới: {state['control']['current_user_input']}. "
+        "Tìm các thông tin liên quan về quy mô gia đình, ưu tiên mua sắm chung "
+        "như tiết kiệm điện hoặc độ ồn, cách xưng hô và phong cách trả lời, "
+        "nhu cầu đúng ngành hàng hiện tại, tương tác sản phẩm và phản hồi gần đây."
+    )
+
+
+async def _recall_memory_node_async(
+    state: AdvisorState, advisor_runtime: AdvisorRuntime
+) -> NodeUpdate:
+    """Recall user-scoped memories, failing open on any Mem0 problem."""
+
+    context = dict(state.get("memory_context") or {})
+    identity = state.get("identity") or {}
+    user_id = identity.get("user_id") if identity.get("authenticated") else None
+    client = advisor_runtime.get_memory()
+    if not context.get("enabled") or not user_id or client is None:
+        return {
+            "memory_context": {
+                **context,
+                "enabled": False,
+                "recall_status": "skipped",
+                "recalled": [],
+            }
+        }
+    try:
+        recalled = await asyncio.wait_for(
+            client.search(
+                _memory_search_query(state, advisor_runtime),
+                user_id=str(user_id),
+                top_k=advisor_runtime.settings.mem0_search_top_k,
+                threshold=advisor_runtime.settings.mem0_search_threshold,
+                rerank=False,
+            ),
+            timeout=advisor_runtime.settings.mem0_search_timeout_seconds,
+        )
+        recalled = list(recalled or [])
+        guardrail = advisor_runtime.get_guardrail()
+        safe_recalled: list[dict[str, Any]] = []
+        blocked_memory_ids: list[str] = []
+        for item in recalled:
+            text = str(item.get("memory") or "")
+            decision = guardrail.inspect(text, surface="recalled_memory")
+            guardrail.record(decision, text)
+            if guardrail.should_block(decision):
+                blocked_memory_ids.append(str(item.get("id") or ""))
+            else:
+                safe_recalled.append(item)
+        remembered_preferences = response_preferences_from_memories(
+            safe_recalled, guardrail
+        )
+        current_preferences = dict(context.get("response_preferences") or {})
+        return {
+            "memory_context": {
+                **context,
+                "enabled": True,
+                "recall_status": "succeeded",
+                "recalled": safe_recalled,
+                "blocked_memory_ids": blocked_memory_ids,
+                # Current-turn preferences win over recalled preferences.
+                "response_preferences": {
+                    **remembered_preferences,
+                    **current_preferences,
+                },
+            },
+            "control": {**state["control"], "stage": "memory_recalled"},
+        }
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning(
+            "Mem0 recall failed; continuing without long-term memory", exc_info=True
+        )
+        return {
+            "memory_context": {
+                **context,
+                "enabled": True,
+                "recall_status": "failed",
+                "recalled": [],
+            },
+            "control": {**state["control"], "stage": "memory_recalled"},
+        }
+
+
+def _run_async_node(coroutine: Any) -> NodeUpdate:
+    """Run adapter I/O from graph sync nodes, including callers already in a loop."""
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+
+    result: list[NodeUpdate] = []
+    errors: list[BaseException] = []
+
+    def runner() -> None:
+        try:
+            result.append(asyncio.run(coroutine))
+        except BaseException as exc:  # propagated in the calling graph thread
+            errors.append(exc)
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
+    thread.join()
+    if errors:
+        raise errors[0]
+    return result[0]
+
+
+def recall_memory_node(
+    state: AdvisorState, advisor_runtime: AdvisorRuntime
+) -> NodeUpdate:
+    return _run_async_node(_recall_memory_node_async(state, advisor_runtime))
 
 
 def analyze_turn_node(
@@ -1466,6 +1653,214 @@ def extract_need_profile_node(
     }
 
 
+def project_memory_node(
+    state: AdvisorState, advisor_runtime: AdvisorRuntime
+) -> NodeUpdate:
+    """Create, but never directly apply, schema-owned decision candidates."""
+
+    category = _active_category(state)
+    memory_context = dict(state.get("memory_context") or {})
+    if not category or not memory_context.get("enabled"):
+        return {"memory_context": memory_context}
+    spec = advisor_runtime.get_category(category)
+    context = _get_category_context(state, category)
+    memory_confirmation = dict(context.get("memory_confirmation") or {})
+    candidates, blocked_ids = project_memories(
+        memories=memory_context.get("recalled") or [],
+        spec=spec,
+        current_profile=context.get("profile") or state.get("need_profile") or {},
+        current_changed_paths=(state.get("control") or {}).get(
+            "profile_changed_paths", []
+        ),
+        confirmed_question_ids=memory_confirmation.get(
+            "confirmed_question_ids", []
+        ),
+        guardrail=advisor_runtime.get_guardrail(),
+        limit=3,
+    )
+    confirmation = {
+        "status": "pending" if candidates else "not_required",
+        "category": category,
+        "message": (
+            "Mình tìm thấy một vài thông tin từ các phiên trước. "
+            "Bạn muốn dùng chúng cho lần tư vấn này không?"
+            if candidates
+            else ""
+        ),
+    }
+    return {
+        "memory_context": {
+            **memory_context,
+            "decision_candidates": candidates,
+            "blocked_memory_ids": list(
+                dict.fromkeys(
+                    [
+                        *(memory_context.get("blocked_memory_ids") or []),
+                        *blocked_ids,
+                    ]
+                )
+            ),
+            "confirmation": confirmation,
+        },
+        "control": {**state["control"], "stage": "memory_projected"},
+    }
+
+
+def collect_memory_confirmation_node(
+    state: AdvisorState, advisor_runtime: AdvisorRuntime
+) -> NodeUpdate:
+    """Interrupt once, then apply use/edit/ignore decisions to the working profile."""
+
+    category = _active_category(state)
+    if not category:
+        raise ValueError("Memory confirmation requires an active category")
+    spec = advisor_runtime.get_category(category)
+    memory_context = dict(state.get("memory_context") or {})
+    candidates = list(memory_context.get("decision_candidates") or [])
+    payload = {
+        "type": "memory_confirmation_required",
+        "category": category,
+        "message": (memory_context.get("confirmation") or {}).get("message", ""),
+        "candidates": candidates,
+    }
+    raw_submission = interrupt(payload)
+    submission = MemoryConfirmationSubmission.model_validate(raw_submission)
+    candidates_by_id = {
+        str(candidate.get("candidate_id")): candidate for candidate in candidates
+    }
+    expected = set(candidates_by_id)
+    received = {decision.candidate_id for decision in submission.decisions}
+    if received != expected:
+        raise ValueError(
+            "Memory decisions must match every pending candidate exactly once; "
+            f"missing={sorted(expected - received)}, "
+            f"unexpected={sorted(received - expected)}"
+        )
+
+    context = _get_category_context(state, category)
+    profile = dict(context.get("profile") or state.get("need_profile") or {})
+    changed_paths: list[str] = []
+    decision_labels: list[str] = []
+    confirmed_memory_inputs: list[str] = []
+    confirmed_questions: set[str] = set(
+        (context.get("memory_confirmation") or {}).get(
+            "confirmed_question_ids", []
+        )
+    )
+    for decision in submission.decisions:
+        candidate = candidates_by_id[decision.candidate_id]
+        question_id = str(candidate["question_id"])
+        confirmed_questions.add(question_id)
+        if decision.action == "ignore":
+            decision_labels.append(f"{question_id}: không dùng")
+            continue
+        if decision.action == "use":
+            patch = ProfilePatch.model_validate(candidate.get("proposed_patch") or {})
+            allowed_paths = spec.question_profile_paths.get(question_id, frozenset())
+            submitted_paths = {
+                *patch.set,
+                *patch.replace,
+                *patch.add,
+                *patch.remove,
+                *patch.clear,
+            }
+            if not submitted_paths or not submitted_paths <= allowed_paths:
+                raise ValueError("Stored memory patch no longer matches category schema")
+            profile, applied = apply_profile_patch(profile, patch, spec)
+            if not applied:
+                raise ValueError("Stored memory patch failed category validation")
+            changed_paths.extend(applied)
+            decision_labels.append(
+                f"{question_id}: {candidate.get('display_value', 'dùng thông tin đã nhớ')}"
+            )
+            confirmed_memory_inputs.append(
+                "Người dùng xác nhận dùng thông tin đã nhớ: "
+                f"{candidate.get('display_value', question_id)}."
+            )
+            continue
+
+        option = _find_option(spec.config, question_id, str(decision.option_id))
+        if decision.option_id == "other":
+            custom_answer = (decision.custom_answer or "").strip()
+            interpretation = _interpret_custom_answer(
+                advisor_runtime, spec, profile, question_id, custom_answer
+            )
+            updates = interpretation.model_dump(
+                exclude={"interpretation_status", "raw_answer", "confidence"},
+                exclude_none=True,
+            )
+            label = custom_answer
+        else:
+            updates = option.get("profile_updates") or {}
+            label = str(option.get("label") or decision.option_id)
+        profile, applied = _apply_question_scoped_updates(
+            profile, updates, spec, question_id
+        )
+        changed_paths.extend(applied)
+        decision_labels.append(f"{question_id}: {label}")
+        confirmed_memory_inputs.append(
+            f"Người dùng sửa và xác nhận {question_id}: {label}."
+        )
+
+    extras = {
+        key: value
+        for key, value in profile.items()
+        if key in {"category", "custom_answers", "latest_query"}
+    }
+    validated = spec.profile_model.model_validate(profile).model_dump(exclude_none=True)
+    validated.update(extras)
+    profile = merge_need_profile({}, validated, category=category)
+    previous_memory_confirmation = dict(context.get("memory_confirmation") or {})
+    memory_confirmation = {
+        **previous_memory_confirmation,
+        "confirmed_question_ids": sorted(confirmed_questions),
+        "decisions": [
+            *(previous_memory_confirmation.get("decisions") or []),
+            *submission.model_dump(mode="json")["decisions"],
+        ],
+    }
+    context = {
+        **context,
+        "profile": profile,
+        "profile_revision": int(context.get("profile_revision") or 0)
+        + (1 if changed_paths else 0),
+        "memory_confirmation": memory_confirmation,
+    }
+    applied_any = any(
+        decision.action in {"use", "edit"} for decision in submission.decisions
+    )
+    return {
+        "messages": [HumanMessage(content="; ".join(decision_labels))],
+        "category_contexts": _put_category_context(state, category, context),
+        "need_profile": profile,
+        "memory_context": {
+            **memory_context,
+            "decision_candidates": [],
+            "confirmation": {
+                "status": "applied" if applied_any else "ignored",
+                "category": category,
+            },
+        },
+        "control": {
+            **state["control"],
+            "stage": "memory_confirmed",
+            "input_kind": "memory_confirmation",
+            "memory_user_inputs": [
+                *((state.get("control") or {}).get("memory_user_inputs") or []),
+                *confirmed_memory_inputs,
+            ],
+            "profile_changed_paths": list(
+                dict.fromkeys(
+                    [
+                        *((state.get("control") or {}).get("profile_changed_paths") or []),
+                        *changed_paths,
+                    ]
+                )
+            ),
+        },
+    }
+
+
 def _public_catalog(
     question_catalog: dict[str, Any], question_ids: list[str]
 ) -> dict[str, Any]:
@@ -1620,6 +2015,34 @@ def _interpret_custom_answer(
     return result
 
 
+def _apply_question_scoped_updates(
+    profile: dict[str, Any],
+    updates: dict[str, Any],
+    spec: CategorySpec,
+    question_id: str,
+) -> tuple[dict[str, Any], list[str]]:
+    """Apply only profile leaves owned by one catalog question."""
+
+    allowed = spec.question_profile_paths.get(question_id, frozenset())
+    flattened = _flatten_profile_values(updates)
+    selected = {
+        path: value
+        for path, value in flattened.items()
+        if path in allowed and path in spec.valid_patch_paths
+    }
+    patch = ProfilePatch(
+        set={
+            path: value
+            for path, value in selected.items()
+            if not isinstance(value, list)
+        },
+        replace={
+            path: value for path, value in selected.items() if isinstance(value, list)
+        },
+    )
+    return apply_profile_patch(profile, patch, spec)
+
+
 def collect_clarification_node(
     state: AdvisorState, advisor_runtime: AdvisorRuntime
 ) -> NodeUpdate:
@@ -1666,10 +2089,10 @@ def collect_clarification_node(
             answer.question_id,
             answer.option_id,
         )
-        answer_labels.append(
-            f"{answer.question_id}: {option.get('label', answer.option_id)}"
-        )
         if answer.option_id != "other":
+            answer_labels.append(
+                f"{answer.question_id}: {option.get('label', answer.option_id)}"
+            )
             updates = option.get("profile_updates") or {}
             before = json.dumps(
                 profile, ensure_ascii=False, sort_keys=True, default=str
@@ -1684,6 +2107,7 @@ def collect_clarification_node(
             continue
 
         custom_answer = (answer.custom_answer or "").strip()
+        answer_labels.append(f"{answer.question_id}: {custom_answer}")
         interpretation = _interpret_custom_answer(
             advisor_runtime, spec, profile, answer.question_id, custom_answer
         )
@@ -1732,6 +2156,10 @@ def collect_clarification_node(
             **state["control"],
             "stage": "clarification_completed",
             "input_kind": "structured_clarification",
+            "memory_user_inputs": [
+                *((state.get("control") or {}).get("memory_user_inputs") or []),
+                "Người dùng xác nhận: " + "; ".join(answer_labels) + ".",
+            ],
             "profile_changed_paths": list(dict.fromkeys(changed_paths)),
         },
     }
@@ -2003,7 +2431,71 @@ def rank_candidates_node(
     }
 
 
+def _response_preferences(state: AdvisorState) -> dict[str, str]:
+    raw = (state.get("memory_context") or {}).get("response_preferences") or {}
+    return {
+        key: str(value)
+        for key, value in raw.items()
+        if key in {"preferred_name", "answer_length", "tone"} and value
+    }
+
+
+def _response_preference_instruction(state: AdvisorState) -> str:
+    preferences = _response_preferences(state)
+    if not preferences:
+        return ""
+    instructions: list[str] = []
+    if name := preferences.get("preferred_name"):
+        instructions.append(f"Gọi người dùng là {name} một cách tự nhiên.")
+    if preferences.get("answer_length") == "short":
+        instructions.append("Trả lời ngắn gọn, ưu tiên các ý quyết định.")
+    elif preferences.get("answer_length") == "detailed":
+        instructions.append("Giải thích đủ chi tiết nhưng không lặp ý.")
+    if preferences.get("tone") == "friendly":
+        instructions.append("Dùng giọng thân thiện.")
+    elif preferences.get("tone") == "professional":
+        instructions.append("Dùng giọng chuyên nghiệp.")
+    return "\nSở thích trình bày đã xác minh: " + " ".join(instructions)
+
+
+def _remembered_event_instruction(state: AdvisorState) -> str:
+    """Expose only non-decision memories to response composition, never ranking."""
+
+    allowed = {"product_interaction", "feedback"}
+    values: list[str] = []
+    guardrail_blocked = set(
+        (state.get("memory_context") or {}).get("blocked_memory_ids") or []
+    )
+    for item in (state.get("memory_context") or {}).get("recalled") or []:
+        if str(item.get("id") or "") in guardrail_blocked:
+            continue
+        categories = {str(value) for value in item.get("categories") or []}
+        if not categories & allowed:
+            continue
+        text = str(item.get("memory") or "").strip()
+        if text:
+            values.append(text)
+        if len(values) >= 3:
+            break
+    if not values:
+        return ""
+    return (
+        "\nBối cảnh sự kiện từ phiên trước (chỉ để diễn đạt tự nhiên; không dùng "
+        "làm bộ lọc, điều kiện loại hay tín hiệu xếp hạng): "
+        + json.dumps(values, ensure_ascii=False)
+    )
+
+
+def _apply_response_preferences(state: AdvisorState, answer: str) -> str:
+    preferences = _response_preferences(state)
+    name = preferences.get("preferred_name")
+    if name and name.casefold() not in answer[:100].casefold():
+        return f"{name}, {answer[:1].lower() + answer[1:] if answer else answer}"
+    return answer
+
+
 def _finalize_response(state: AdvisorState, answer: str) -> NodeUpdate:
+    answer = _apply_response_preferences(state, answer)
     category = _active_category(state)
     if not category:
         return {
@@ -2128,7 +2620,7 @@ def _compose_no_match_answer(
         conversation_history=json.dumps(
             _conversation_history(state), ensure_ascii=False, default=str
         ),
-    )
+    ) + _response_preference_instruction(state) + _remembered_event_instruction(state)
     try:
         llm_message = advisor_runtime.get_llm().invoke(
             advisor_runtime.guarded_prompt(prompt)
@@ -2183,7 +2675,7 @@ def compose_response_node(
             "need_profile": state["need_profile"],
             "selected_products": grounded_selection,
         }
-    )
+    ) + _response_preference_instruction(state) + _remembered_event_instruction(state)
     try:
         llm_message = advisor_runtime.get_llm().invoke(
             advisor_runtime.guarded_prompt(prompt)
@@ -2230,3 +2722,94 @@ def placeholder_response_node(state: AdvisorState) -> NodeUpdate:
             "Mình chưa nhận ra ngành hàng bạn cần. Bạn đang muốn tìm loại sản phẩm nào?"
         )
     return _finalize_response(state, answer)
+
+
+async def _queue_memory_write_node_async(
+    state: AdvisorState,
+    advisor_runtime: AdvisorRuntime,
+    config: RunnableConfig | None = None,
+) -> NodeUpdate:
+    """Queue the completed user/assistant turn in Mem0 without blocking advice on errors."""
+
+    memory_context = dict(state.get("memory_context") or {})
+    identity = state.get("identity") or {}
+    user_id = identity.get("user_id") if identity.get("authenticated") else None
+    client = advisor_runtime.get_memory()
+    answer = str((state.get("response") or {}).get("answer") or "").strip()
+    if not memory_context.get("enabled") or not user_id or client is None or not answer:
+        return {
+            "memory_context": {
+                **memory_context,
+                "write": {"status": "skipped", "event_id": None},
+            },
+            "control": {**state.get("control", {}), "stage": "completed"},
+        }
+
+    configurable = (config or {}).get("configurable") or {}
+    thread_id = str(configurable.get("thread_id") or "")
+    conversation = state.get("conversation") or {}
+    category = _active_category(state)
+    memory_user_inputs = [
+        str(value).strip()
+        for value in (state.get("control") or {}).get("memory_user_inputs") or []
+        if str(value).strip()
+    ]
+    user_content = "\n".join(memory_user_inputs) or str(
+        state["control"]["current_user_input"]
+    )
+    try:
+        queued = await asyncio.wait_for(
+            client.add(
+                [
+                    {
+                        "role": "user",
+                        "content": user_content,
+                    },
+                    {"role": "assistant", "content": answer},
+                ],
+                user_id=str(user_id),
+                metadata={
+                    "thread_id": thread_id,
+                    "turn_id": int(conversation.get("turn_id") or 0),
+                    "active_category": category,
+                },
+            ),
+            timeout=advisor_runtime.settings.mem0_search_timeout_seconds,
+        )
+        return {
+            "memory_context": {
+                **memory_context,
+                "write": {
+                    "status": "queued",
+                    "event_id": str(queued["event_id"]),
+                },
+            },
+            "control": {**state["control"], "stage": "memory_write_queued"},
+        }
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning(
+            "Mem0 write queue failed; preserving completed advisor response",
+            exc_info=True,
+        )
+        return {
+            "memory_context": {
+                **memory_context,
+                "write": {"status": "failed", "event_id": None},
+            },
+            "control": {**state["control"], "stage": "memory_write_failed"},
+        }
+
+
+def queue_memory_write_node(
+    state: AdvisorState,
+    advisor_runtime: AdvisorRuntime,
+) -> NodeUpdate:
+    try:
+        config: RunnableConfig | None = get_config()
+    except RuntimeError:
+        config = None
+    return _run_async_node(
+        _queue_memory_write_node_async(state, advisor_runtime, config)
+    )

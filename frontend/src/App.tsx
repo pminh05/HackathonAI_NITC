@@ -14,15 +14,27 @@ import {
   ApiError,
   ClarificationAnswer,
   ClarificationQuestion,
+  MemoryCandidate,
+  MemoryConfirmation,
+  MemoryConfirmationDecision,
+  MemoryRecord,
+  MemoryWriteSummary,
   SelectedProduct,
   SseEvent,
+  deleteAllMemories,
+  deleteMemory,
+  getMemories,
+  getMemoryWriteStatus,
   getThreadStatus,
   resolveProductImageUrl,
   resumeChat,
+  resumeMemoryConfirmation,
   streamChat,
 } from "./api";
+import { authConfigured, supabase, type Session } from "./auth";
 
-const STORAGE_KEY = "product-advisor:mvp:v1";
+const storageKeyFor = (userId: string | null): string =>
+  `product-advisor-chat-v2:${userId || "anonymous"}`;
 
 type UserItem = { id: string; type: "user"; text: string };
 type AssistantItem = {
@@ -40,7 +52,17 @@ type ClarificationItem = {
   confirmedIds: string[];
   submitted: boolean;
 };
-type TimelineItem = UserItem | AssistantItem | ClarificationItem;
+type MemoryConfirmationItem = {
+  id: string;
+  type: "memory_confirmation";
+  confirmation: MemoryConfirmation;
+  submitted: boolean;
+};
+type TimelineItem =
+  | UserItem
+  | AssistantItem
+  | ClarificationItem
+  | MemoryConfirmationItem;
 type Phase =
   | "idle"
   | "sending"
@@ -58,6 +80,7 @@ interface ChatState {
 }
 
 type Action =
+  | { type: "LOAD_STATE"; state: ChatState }
   | { type: "ADD_USER"; item: UserItem }
   | { type: "ADD_ASSISTANT"; item: AssistantItem }
   | { type: "SET_THREAD"; threadId: string }
@@ -76,6 +99,11 @@ type Action =
       questions: ClarificationQuestion[];
     }
   | {
+      type: "ADD_MEMORY_CONFIRMATION";
+      assistantId: string;
+      confirmation: MemoryConfirmation;
+    }
+  | {
       type: "SELECT_OPTION";
       itemId: string;
       questionId: string;
@@ -89,7 +117,9 @@ type Action =
     }
   | { type: "CONFIRM_ANSWER"; itemId: string; questionId: string }
   | { type: "MARK_SUBMITTED"; itemId: string }
+  | { type: "MARK_MEMORY_SUBMITTED"; itemId: string }
   | { type: "RECONCILE_WAITING"; questions: ClarificationQuestion[] }
+  | { type: "RECONCILE_MEMORY"; confirmation: MemoryConfirmation }
   | { type: "RECONCILE_COMPLETED"; answer: string; products: SelectedProduct[] }
   | { type: "REQUEST_FAILED"; assistantId?: string; message: string }
   | { type: "CLEAR_ERROR" }
@@ -107,9 +137,9 @@ function createId(): string {
   return crypto.randomUUID();
 }
 
-function loadState(): ChatState {
+function loadState(storageKey: string): ChatState {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey);
     if (!raw) return emptyState;
     const saved = JSON.parse(raw) as {
       version?: number;
@@ -117,7 +147,7 @@ function loadState(): ChatState {
       items?: unknown;
     };
     if (
-      saved.version !== 1 ||
+      saved.version !== 2 ||
       typeof saved.threadId !== "string" ||
       !Array.isArray(saved.items)
     ) {
@@ -131,7 +161,7 @@ function loadState(): ChatState {
       error: null,
     };
   } catch {
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(storageKey);
     return emptyState;
   }
 }
@@ -179,6 +209,8 @@ function reconcileClarification(
 
 function reducer(state: ChatState, action: Action): ChatState {
   switch (action.type) {
+    case "LOAD_STATE":
+      return action.state;
     case "ADD_USER":
       return { ...state, items: [...state.items, action.item], error: null };
     case "ADD_ASSISTANT":
@@ -231,6 +263,22 @@ function reducer(state: ChatState, action: Action): ChatState {
         items: [
           ...state.items.filter((item) => item.id !== action.assistantId),
           reconcileClarification(undefined, action.questions),
+        ],
+      };
+    case "ADD_MEMORY_CONFIRMATION":
+      return {
+        ...state,
+        phase: "waiting",
+        progress: null,
+        error: null,
+        items: [
+          ...state.items.filter((item) => item.id !== action.assistantId),
+          {
+            id: createId(),
+            type: "memory_confirmation",
+            confirmation: action.confirmation,
+            submitted: false,
+          },
         ],
       };
     case "SELECT_OPTION":
@@ -302,6 +350,15 @@ function reducer(state: ChatState, action: Action): ChatState {
             : item,
         ),
       };
+    case "MARK_MEMORY_SUBMITTED":
+      return {
+        ...state,
+        items: state.items.map((item) =>
+          item.id === action.itemId && item.type === "memory_confirmation"
+            ? { ...item, submitted: true }
+            : item,
+        ),
+      };
     case "RECONCILE_WAITING": {
       const existingIndex = state.items.findLastIndex(
         (item) => item.type === "clarification",
@@ -325,6 +382,35 @@ function reducer(state: ChatState, action: Action): ChatState {
         else items.push(clarification);
       } else {
         items.push(clarification);
+      }
+      return { ...state, items, phase: "waiting", progress: null, error: null };
+    }
+    case "RECONCILE_MEMORY": {
+      const existingIndex = state.items.findLastIndex(
+        (item) => item.type === "memory_confirmation",
+      );
+      const lastUserIndex = state.items.findLastIndex(
+        (item) => item.type === "user",
+      );
+      const existing =
+        existingIndex > lastUserIndex
+          ? (state.items[existingIndex] as MemoryConfirmationItem)
+          : undefined;
+      const memoryItem: MemoryConfirmationItem = {
+        id: existing?.id ?? createId(),
+        type: "memory_confirmation",
+        confirmation: action.confirmation,
+        submitted: false,
+      };
+      const items = state.items.filter(
+        (item) => !(item.type === "assistant" && item.streaming && !item.text),
+      );
+      if (existing) {
+        const index = items.findIndex((item) => item.id === existing.id);
+        if (index >= 0) items[index] = memoryItem;
+        else items.push(memoryItem);
+      } else {
+        items.push(memoryItem);
       }
       return { ...state, items, phase: "waiting", progress: null, error: null };
     }
@@ -388,12 +474,16 @@ function reducer(state: ChatState, action: Action): ChatState {
 
 const progressLabels: Record<string, string> = {
   intent_detected: "Đang hiểu nhu cầu…",
+  memory_recalled: "Đang tìm thông tin từ các phiên trước…",
+  memory_projected: "Đang đối chiếu hồ sơ đã nhớ…",
+  memory_confirmed: "Đã xác nhận thông tin từ hồ sơ…",
   need_extracted: "Đang hiểu nhu cầu…",
   clarification_ready: "Đang chuẩn bị câu hỏi…",
   clarification_completed: "Đang tìm sản phẩm…",
   filter_built: "Đang tìm sản phẩm…",
   retrieval_completed: "Đang tìm sản phẩm…",
   ranking_completed: "Đang hoàn thiện gợi ý…",
+  memory_write_queued: "Đang cập nhật hồ sơ đã nhớ…",
 };
 
 const MAX_MESSAGE_WORDS = 1_000;
@@ -424,6 +514,8 @@ function limitWords(value: string, maximum: number): string {
 
 function messageFromError(error: unknown): string {
   if (error instanceof ApiError) {
+    if (error.status === 401)
+      return "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
     if (error.status === 409)
       return "Cuộc trò chuyện đang được xử lý hoặc chưa sẵn sàng.";
     if (error.status === 404)
@@ -670,16 +762,460 @@ function ClarificationCard({
   );
 }
 
+function MemoryConfirmationCard({
+  item,
+  disabled,
+  onSubmit,
+}: {
+  item: MemoryConfirmationItem;
+  disabled: boolean;
+  onSubmit: (decisions: MemoryConfirmationDecision[]) => void;
+}) {
+  const [decisions, setDecisions] = useState<
+    Record<string, MemoryConfirmationDecision>
+  >({});
+
+  const choose = (
+    candidate: MemoryCandidate,
+    action: MemoryConfirmationDecision["action"],
+  ) => {
+    setDecisions((current) => ({
+      ...current,
+      [candidate.candidate_id]: {
+        candidate_id: candidate.candidate_id,
+        action,
+      },
+    }));
+  };
+
+  const setEditedOption = (candidate: MemoryCandidate, optionId: string) => {
+    setDecisions((current) => ({
+      ...current,
+      [candidate.candidate_id]: {
+        candidate_id: candidate.candidate_id,
+        action: "edit",
+        option_id: optionId,
+      },
+    }));
+  };
+
+  const setCustom = (candidate: MemoryCandidate, value: string) => {
+    setDecisions((current) => ({
+      ...current,
+      [candidate.candidate_id]: {
+        ...(current[candidate.candidate_id] || {
+          candidate_id: candidate.candidate_id,
+          action: "edit" as const,
+          option_id: "other",
+        }),
+        custom_answer: value,
+      },
+    }));
+  };
+
+  const ready = item.confirmation.candidates.every((candidate) => {
+    const decision = decisions[candidate.candidate_id];
+    if (!decision) return false;
+    if (decision.action !== "edit") return true;
+    if (!decision.option_id) return false;
+    return decision.option_id !== "other" || Boolean(decision.custom_answer?.trim());
+  });
+
+  const submit = () => {
+    if (!ready) return;
+    onSubmit(
+      item.confirmation.candidates.map(
+        (candidate) => decisions[candidate.candidate_id],
+      ),
+    );
+  };
+
+  return (
+    <section className="memory-confirmation-card" aria-label="Xác nhận hồ sơ đã nhớ">
+      <div className="advisor-label">Từ các phiên trước</div>
+      <h2>Mình nhớ một vài điều về bạn</h2>
+      <p className="memory-confirmation-intro">
+        {item.confirmation.message ||
+          "Chọn thông tin bạn muốn dùng cho lần tư vấn này."}
+      </p>
+      <div className="memory-candidate-list">
+        {item.confirmation.candidates.map((candidate) => {
+          const decision = decisions[candidate.candidate_id];
+          return (
+            <article className="memory-candidate" key={candidate.candidate_id}>
+              <span className="memory-source">Hồ sơ đã nhớ</span>
+              <strong>{candidate.display_value}</strong>
+              <small>{candidate.question}</small>
+              <div className="memory-actions" role="group">
+                <button
+                  type="button"
+                  className={decision?.action === "use" ? "selected" : ""}
+                  disabled={disabled || item.submitted}
+                  onClick={() => choose(candidate, "use")}
+                >
+                  Dùng
+                </button>
+                <button
+                  type="button"
+                  className={decision?.action === "edit" ? "selected" : ""}
+                  disabled={disabled || item.submitted}
+                  onClick={() => choose(candidate, "edit")}
+                >
+                  Sửa
+                </button>
+                <button
+                  type="button"
+                  className={decision?.action === "ignore" ? "selected" : ""}
+                  disabled={disabled || item.submitted}
+                  onClick={() => choose(candidate, "ignore")}
+                >
+                  Không dùng
+                </button>
+              </div>
+              {decision?.action === "edit" ? (
+                <div className="memory-edit-fields">
+                  <select
+                    value={decision.option_id || ""}
+                    disabled={disabled || item.submitted}
+                    onChange={(event) =>
+                      setEditedOption(candidate, event.target.value)
+                    }
+                  >
+                    <option value="">Chọn giá trị mới…</option>
+                    {candidate.options.map((option) => (
+                      <option value={option.option_id} key={option.option_id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  {decision.option_id === "other" ? (
+                    <input
+                      type="text"
+                      value={decision.custom_answer || ""}
+                      disabled={disabled || item.submitted}
+                      placeholder="Nhập câu trả lời khác…"
+                      onChange={(event) => setCustom(candidate, event.target.value)}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+            </article>
+          );
+        })}
+      </div>
+      {item.submitted ? (
+        <div className="submitted-note">✓ Đã gửi lựa chọn</div>
+      ) : (
+        <button
+          type="button"
+          className="primary-button submit-memory"
+          disabled={disabled || !ready}
+          onClick={submit}
+        >
+          Xác nhận và tiếp tục
+        </button>
+      )}
+    </section>
+  );
+}
+
+const memoryCategoryLabels: Record<string, string> = {
+  identity_style: "Tên gọi và phong cách",
+  household_context: "Gia đình và sinh hoạt",
+  shopping_preference: "Ưu tiên mua sắm",
+  category_need: "Nhu cầu theo ngành hàng",
+  product_interaction: "Sản phẩm đã tương tác",
+  feedback: "Phản hồi sản phẩm",
+};
+
+const productCategoryLabels: Record<string, string> = {
+  refrigerator: "Tủ lạnh",
+  washing_machine: "Máy giặt",
+  air_conditioner: "Máy lạnh",
+  dryer: "Máy sấy quần áo",
+  dishwasher: "Máy rửa chén",
+  cooler_freezer: "Tủ mát, tủ đông",
+  water_heater: "Máy nước nóng",
+};
+
+function MemoryPanel({
+  records,
+  count,
+  loading,
+  error,
+  onClose,
+  onRefresh,
+  onDelete,
+  onDeleteAll,
+}: {
+  records: MemoryRecord[];
+  count: number;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+  onRefresh: () => void;
+  onDelete: (id: string) => void;
+  onDeleteAll: () => void;
+}) {
+  const groups = records.reduce<Record<string, MemoryRecord[]>>((result, record) => {
+    const category = record.categories[0] || "Thông tin khác";
+    (result[category] ||= []).push(record);
+    return result;
+  }, {});
+  const formatTime = (value?: string | null) => {
+    if (!value) return "Không rõ thời gian";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+      ? "Không rõ thời gian"
+      : new Intl.DateTimeFormat("vi-VN", {
+          dateStyle: "short",
+          timeStyle: "short",
+        }).format(date);
+  };
+
+  return (
+    <div className="memory-panel-backdrop" role="presentation" onMouseDown={onClose}>
+      <aside
+        className="memory-panel"
+        aria-label="Hồ sơ đang nhớ"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="memory-panel-heading">
+          <div>
+            <span>Cá nhân hóa xuyên phiên</span>
+            <h2>Hồ sơ đang nhớ ({count})</h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Đóng hồ sơ">
+            ×
+          </button>
+        </div>
+        {loading ? <p className="memory-panel-state">Đang tải hồ sơ…</p> : null}
+        {error ? (
+          <div className="memory-panel-error">
+            <span>{error}</span>
+            <button type="button" onClick={onRefresh}>Thử lại</button>
+          </div>
+        ) : null}
+        {!loading && !error && records.length === 0 ? (
+          <p className="memory-panel-state">Chưa có thông tin nào được ghi nhớ.</p>
+        ) : null}
+        <div className="memory-groups">
+          {Object.entries(groups).map(([category, items]) => (
+            <section key={category}>
+              <h3>
+                {memoryCategoryLabels[category] || category.replaceAll("_", " ")}
+              </h3>
+              {items.map((record) => (
+                <article className="memory-record" key={record.id}>
+                  <p>{record.memory}</p>
+                  <div>
+                    <span>
+                      {formatTime(record.updated_at || record.created_at)}
+                      {record.metadata.active_category
+                        ? ` · ${productCategoryLabels[record.metadata.active_category] || record.metadata.active_category}`
+                        : ""}
+                    </span>
+                    <button type="button" onClick={() => onDelete(record.id)}>
+                      Quên
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </section>
+          ))}
+        </div>
+        {records.length > 0 ? (
+          <button className="forget-all-button" type="button" onClick={onDeleteAll}>
+            Quên toàn bộ
+          </button>
+        ) : null}
+      </aside>
+    </div>
+  );
+}
+
 export default function App() {
-  const [state, dispatch] = useReducer(reducer, undefined, loadState);
+  const [state, dispatch] = useReducer(reducer, emptyState);
   const [message, setMessage] = useState("");
+  const [session, setSession] = useState<Session | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [memoryPanelOpen, setMemoryPanelOpen] = useState(false);
+  const [memoryRecords, setMemoryRecords] = useState<MemoryRecord[]>([]);
+  const [memoryCount, setMemoryCount] = useState(0);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [memoryNotice, setMemoryNotice] = useState<{
+    status: "updating" | "success" | "failed";
+    message: string;
+  } | null>(null);
   const requestInFlight = useRef(false);
   const activeRequest = useRef<AbortController | null>(null);
+  const memoryPoll = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
-  const initialThreadId = useRef(state.threadId);
+  const authInitialized = useRef(false);
+  const identityNamespace = useRef<string | null>(null);
+  const restoreStarted = useRef<string | null>(null);
+  const userId = session?.user.id || null;
+  const accessToken = session?.access_token || null;
+  const storageKey = storageKeyFor(userId);
+
+  const refreshMemories = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!accessToken) {
+        setMemoryRecords([]);
+        setMemoryCount(0);
+        return;
+      }
+      setMemoryLoading(true);
+      setMemoryError(null);
+      try {
+        const result = await getMemories(accessToken, signal);
+        setMemoryRecords(result.results);
+        setMemoryCount(result.count);
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+        setMemoryError(messageFromError(error));
+      } finally {
+        setMemoryLoading(false);
+      }
+    },
+    [accessToken],
+  );
+
+  const beginMemoryWritePolling = useCallback(
+    (threadId: string, write: MemoryWriteSummary | undefined, token: string | null) => {
+      memoryPoll.current?.abort();
+      if (!write || write.status === "skipped") return;
+      if (write.status === "failed" || !token) {
+        setMemoryNotice({
+          status: "failed",
+          message: "Hồ sơ tạm thời chưa được cập nhật.",
+        });
+        return;
+      }
+      const controller = new AbortController();
+      memoryPoll.current = controller;
+      setMemoryNotice({ status: "updating", message: "Đang cập nhật hồ sơ đã nhớ…" });
+      void (async () => {
+        try {
+          for (let attempt = 0; attempt < 20; attempt += 1) {
+            const result = await getMemoryWriteStatus(
+              threadId,
+              token,
+              controller.signal,
+            );
+            if (result.status === "succeeded") {
+              if (result.added_count > 0) {
+                setMemoryNotice({
+                  status: "success",
+                  message: `Đã ghi nhớ thêm ${result.added_count} thông tin`,
+                });
+                try {
+                  const memories = await getMemories(token, controller.signal);
+                  setMemoryRecords(memories.results);
+                  setMemoryCount(memories.count);
+                } catch {
+                  // The write succeeded; profile refresh can be retried from the panel.
+                }
+              } else {
+                setMemoryNotice({
+                  status: "success",
+                  message: "Không có thông tin mới cần ghi nhớ",
+                });
+              }
+              return;
+            }
+            if (result.status === "failed") {
+              setMemoryNotice({
+                status: "failed",
+                message: "Hồ sơ tạm thời chưa được cập nhật.",
+              });
+              return;
+            }
+            await wait(750, controller.signal);
+          }
+          setMemoryNotice({
+            status: "failed",
+            message: "Hồ sơ đang xử lý lâu hơn dự kiến; bạn vẫn có thể tiếp tục.",
+          });
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError") return;
+          setMemoryNotice({
+            status: "failed",
+            message: "Hồ sơ tạm thời chưa được cập nhật.",
+          });
+        } finally {
+          if (memoryPoll.current === controller) memoryPoll.current = null;
+        }
+      })();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let alive = true;
+    const applySession = (nextSession: Session | null) => {
+      if (!alive) return;
+      const nextNamespace = nextSession?.user.id || "anonymous";
+      if (!authInitialized.current) {
+        authInitialized.current = true;
+        identityNamespace.current = nextNamespace;
+        setSession(nextSession);
+        dispatch({
+          type: "LOAD_STATE",
+          state: loadState(storageKeyFor(nextSession?.user.id || null)),
+        });
+        setAuthReady(true);
+        return;
+      }
+      if (identityNamespace.current !== nextNamespace) {
+        activeRequest.current?.abort();
+        memoryPoll.current?.abort();
+        requestInFlight.current = false;
+        restoreStarted.current = null;
+        setMessage("");
+        setMemoryNotice(null);
+        setMemoryRecords([]);
+        setMemoryCount(0);
+        setMemoryPanelOpen(false);
+        setLoginOpen(false);
+        dispatch({ type: "RESET" });
+      }
+      identityNamespace.current = nextNamespace;
+      setSession(nextSession);
+      setAuthReady(true);
+    };
+
+    if (!supabase) {
+      applySession(null);
+      return () => {
+        alive = false;
+      };
+    }
+    void supabase.auth
+      .getSession()
+      .then(({ data }) => applySession(data.session))
+      .catch(() => applySession(null));
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) =>
+      applySession(nextSession),
+    );
+    return () => {
+      alive = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
 
   const restoreThread = useCallback(
-    async (threadId: string, signal: AbortSignal) => {
+    async (
+      threadId: string,
+      token: string | null,
+      signal: AbortSignal,
+    ) => {
       dispatch({
         type: "SET_PHASE",
         phase: "restoring",
@@ -687,7 +1223,17 @@ export default function App() {
       });
       try {
         for (let attempt = 0; attempt < 30; attempt += 1) {
-          const status = await getThreadStatus(threadId, signal);
+          const status = await getThreadStatus(threadId, token, signal);
+          if (
+            status.status === "waiting_for_memory_confirmation" &&
+            status.memory_confirmation
+          ) {
+            dispatch({
+              type: "RECONCILE_MEMORY",
+              confirmation: status.memory_confirmation,
+            });
+            return;
+          }
           if (status.status === "waiting_for_clarification") {
             dispatch({
               type: "RECONCILE_WAITING",
@@ -701,6 +1247,7 @@ export default function App() {
               answer: status.answer || "",
               products: status.selected_products || [],
             });
+            beginMemoryWritePolling(threadId, status.memory_write || undefined, token);
             return;
           }
           dispatch({
@@ -717,7 +1264,7 @@ export default function App() {
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") return;
         if (error instanceof ApiError && error.status === 404) {
-          localStorage.removeItem(STORAGE_KEY);
+          localStorage.removeItem(storageKeyFor(token ? userId : null));
           dispatch({
             type: "RESET",
             message: "Phiên đã lưu không còn tồn tại trên server.",
@@ -727,27 +1274,30 @@ export default function App() {
         dispatch({ type: "REQUEST_FAILED", message: messageFromError(error) });
       }
     },
-    [],
+    [beginMemoryWritePolling, userId],
   );
 
   useEffect(() => {
-    const threadId = initialThreadId.current;
-    if (!threadId) return;
+    if (!authReady || state.phase !== "restoring" || !state.threadId) return;
+    const restoreKey = `${storageKey}:${state.threadId}`;
+    if (restoreStarted.current === restoreKey) return;
+    restoreStarted.current = restoreKey;
     const controller = new AbortController();
-    void restoreThread(threadId, controller.signal);
+    void restoreThread(state.threadId, accessToken, controller.signal);
     return () => controller.abort();
-  }, [restoreThread]);
+  }, [accessToken, authReady, restoreThread, state.phase, state.threadId, storageKey]);
 
   useEffect(() => {
+    if (!authReady) return;
     if (!state.threadId) {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(storageKey);
       return;
     }
     try {
       localStorage.setItem(
-        STORAGE_KEY,
+        storageKey,
         JSON.stringify({
-          version: 1,
+          version: 2,
           threadId: state.threadId,
           items: state.items,
         }),
@@ -755,13 +1305,26 @@ export default function App() {
     } catch {
       // The live conversation remains usable when browser storage is unavailable.
     }
-  }, [state.threadId, state.items]);
+  }, [authReady, state.threadId, state.items, storageKey]);
+
+  useEffect(() => {
+    if (!authReady || !accessToken) return;
+    const controller = new AbortController();
+    void refreshMemories(controller.signal);
+    return () => controller.abort();
+  }, [accessToken, authReady, refreshMemories]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [state.items, state.progress, state.error]);
 
-  useEffect(() => () => activeRequest.current?.abort(), []);
+  useEffect(
+    () => () => {
+      activeRequest.current?.abort();
+      memoryPoll.current?.abort();
+    },
+    [],
+  );
 
   const activeClarification = useMemo(
     () =>
@@ -771,11 +1334,23 @@ export default function App() {
       ),
     [state.items],
   );
+  const activeMemoryConfirmation = useMemo(
+    () =>
+      state.items.findLast(
+        (item): item is MemoryConfirmationItem =>
+          item.type === "memory_confirmation" && !item.submitted,
+      ),
+    [state.items],
+  );
   const busy =
     state.phase === "sending" ||
     state.phase === "resuming" ||
     state.phase === "restoring";
-  const canSend = state.phase === "idle" && !activeClarification;
+  const canSend =
+    authReady &&
+    state.phase === "idle" &&
+    !activeClarification &&
+    !activeMemoryConfirmation;
 
   const handleStreamEvent = (
     event: SseEvent,
@@ -811,6 +1386,20 @@ export default function App() {
           questions: event.data.questions,
         });
         break;
+      case "memory_confirmation_required":
+        markTerminal();
+        rememberThread(event.data.thread_id);
+        dispatch({ type: "SET_THREAD", threadId: event.data.thread_id });
+        dispatch({
+          type: "ADD_MEMORY_CONFIRMATION",
+          assistantId,
+          confirmation: {
+            message: event.data.message,
+            category: event.data.category,
+            candidates: event.data.candidates,
+          },
+        });
+        break;
       case "completed":
         markTerminal();
         rememberThread(event.data.thread_id);
@@ -821,6 +1410,11 @@ export default function App() {
           answer: event.data.answer,
           products: event.data.selected_products || [],
         });
+        beginMemoryWritePolling(
+          event.data.thread_id,
+          event.data.memory_write,
+          accessToken,
+        );
         break;
       case "error":
         markTerminal();
@@ -875,6 +1469,7 @@ export default function App() {
               activeThreadId = threadId;
             },
           ),
+        accessToken,
         controller.signal,
       );
       if (!terminal)
@@ -943,6 +1538,77 @@ export default function App() {
             },
             () => undefined,
           ),
+        accessToken,
+        controller.signal,
+      );
+      if (!terminal)
+        throw new Error("Stream kết thúc trước khi có kết quả cuối.");
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "AbortError")) {
+        dispatch({
+          type: "REQUEST_FAILED",
+          assistantId,
+          message: messageFromError(error),
+        });
+      }
+    } finally {
+      requestInFlight.current = false;
+      activeRequest.current = null;
+    }
+  };
+
+  const submitMemoryConfirmation = async (
+    item: MemoryConfirmationItem,
+    decisions: MemoryConfirmationDecision[],
+  ) => {
+    if (requestInFlight.current || !state.threadId || !accessToken) return;
+    if (decisions.length !== item.confirmation.candidates.length) return;
+    requestInFlight.current = true;
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    const assistantId = createId();
+    let terminal = false;
+    dispatch({ type: "MARK_MEMORY_SUBMITTED", itemId: item.id });
+    dispatch({
+      type: "ADD_ASSISTANT",
+      item: {
+        id: assistantId,
+        type: "assistant",
+        text: "",
+        products: [],
+        streaming: true,
+      },
+    });
+    dispatch({
+      type: "SET_PHASE",
+      phase: "resuming",
+      progress: "Đang áp dụng thông tin đã xác nhận…",
+    });
+    try {
+      await resumeMemoryConfirmation(
+        state.threadId,
+        decisions.map((decision) => ({
+          candidate_id: decision.candidate_id,
+          action: decision.action,
+          ...(decision.action === "edit"
+            ? {
+                option_id: decision.option_id,
+                ...(decision.option_id === "other"
+                  ? { custom_answer: decision.custom_answer?.trim() }
+                  : {}),
+              }
+            : {}),
+        })),
+        (sseEvent) =>
+          handleStreamEvent(
+            sseEvent,
+            assistantId,
+            () => {
+              terminal = true;
+            },
+            () => undefined,
+          ),
+        accessToken,
         controller.signal,
       );
       if (!terminal)
@@ -966,17 +1632,76 @@ export default function App() {
     requestInFlight.current = true;
     const controller = new AbortController();
     activeRequest.current = controller;
-    void restoreThread(state.threadId, controller.signal).finally(() => {
+    void restoreThread(state.threadId, accessToken, controller.signal).finally(() => {
       requestInFlight.current = false;
       activeRequest.current = null;
     });
   };
 
   const startNewConversation = () => {
-    if (busy) return;
-    localStorage.removeItem(STORAGE_KEY);
+    if (busy || memoryNotice?.status === "updating") return;
+    localStorage.removeItem(storageKey);
     setMessage("");
     dispatch({ type: "RESET" });
+  };
+
+  const signIn = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!supabase || authBusy || !loginEmail.trim() || !loginPassword) return;
+    setAuthBusy(true);
+    setAuthError(null);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: loginEmail.trim(),
+        password: loginPassword,
+      });
+      if (error) setAuthError("Email hoặc mật khẩu không đúng.");
+      else {
+        setLoginPassword("");
+        setLoginOpen(false);
+      }
+    } catch {
+      setAuthError("Không thể kết nối tới dịch vụ đăng nhập.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const signOut = async () => {
+    if (!supabase || authBusy) return;
+    setAuthBusy(true);
+    setAuthError(null);
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) setAuthError("Chưa thể đăng xuất. Vui lòng thử lại.");
+    } catch {
+      setAuthError("Không thể kết nối tới dịch vụ đăng nhập.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleDeleteMemory = async (memoryId: string) => {
+    if (!accessToken) return;
+    try {
+      await deleteMemory(memoryId, accessToken);
+      await refreshMemories();
+    } catch (error) {
+      setMemoryError(messageFromError(error));
+    }
+  };
+
+  const handleDeleteAllMemories = async () => {
+    if (!accessToken) return;
+    if (!window.confirm("Quên toàn bộ hồ sơ dài hạn? Thao tác này không thể hoàn tác."))
+      return;
+    try {
+      await deleteAllMemories(accessToken);
+      setMemoryRecords([]);
+      setMemoryCount(0);
+    } catch (error) {
+      setMemoryError(messageFromError(error));
+    }
   };
 
   const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -986,7 +1711,7 @@ export default function App() {
     }
   };
 
-  const composerPlaceholder = activeClarification
+  const composerPlaceholder = activeClarification || activeMemoryConfirmation
     ? "Hãy hoàn tất các lựa chọn phía trên"
     : busy
       ? "Product Advisor đang xử lý…"
@@ -1012,16 +1737,113 @@ export default function App() {
           <div className="online-status">
             <span aria-hidden="true" /> Trực tuyến
           </div>
+          {session ? (
+            <>
+              <button
+                className="memory-profile-button"
+                type="button"
+                onClick={() => setMemoryPanelOpen(true)}
+              >
+                {memoryNotice?.status === "updating"
+                  ? "Đang cập nhật"
+                  : "Hồ sơ đang nhớ"}{" "}
+                <strong>{memoryCount}</strong>
+              </button>
+              <div className="signed-in-user" title={session.user.email || undefined}>
+                <span>Cá nhân hóa đang bật</span>
+                <strong>{session.user.email || "Tài khoản demo"}</strong>
+              </div>
+              <button
+                className="auth-button"
+                type="button"
+                disabled={authBusy}
+                onClick={() => void signOut()}
+              >
+                Đăng xuất
+              </button>
+            </>
+          ) : authConfigured ? (
+            <button
+              className="auth-button"
+              type="button"
+              disabled={!authReady || authBusy}
+              onClick={() => {
+                setAuthError(null);
+                setLoginOpen(true);
+              }}
+            >
+              Đăng nhập
+            </button>
+          ) : (
+            <span className="anonymous-status">Ẩn danh</span>
+          )}
           <button
             className="new-chat-button"
             type="button"
-            disabled={busy || (!state.threadId && state.items.length === 0)}
+            disabled={
+              busy ||
+              memoryNotice?.status === "updating" ||
+              (!state.threadId && state.items.length === 0)
+            }
             onClick={startNewConversation}
           >
             <span aria-hidden="true">↻</span> Cuộc trò chuyện mới
           </button>
         </div>
       </header>
+
+      {loginOpen && !session ? (
+        <div
+          className="login-backdrop"
+          role="presentation"
+          onMouseDown={() => !authBusy && setLoginOpen(false)}
+        >
+          <form
+            className="login-card"
+            onSubmit={(event) => void signIn(event)}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button
+              className="login-close"
+              type="button"
+              aria-label="Đóng đăng nhập"
+              disabled={authBusy}
+              onClick={() => setLoginOpen(false)}
+            >
+              ×
+            </button>
+            <span>Tài khoản demo</span>
+            <h2>Đăng nhập để bật cá nhân hóa</h2>
+            <p>Hồ sơ được dùng xuyên các cuộc trò chuyện của riêng tài khoản này.</p>
+            <label>
+              Email
+              <input
+                type="email"
+                autoComplete="email"
+                required
+                value={loginEmail}
+                disabled={authBusy}
+                onChange={(event) => setLoginEmail(event.target.value)}
+              />
+            </label>
+            <label>
+              Mật khẩu
+              <input
+                type="password"
+                autoComplete="current-password"
+                required
+                value={loginPassword}
+                disabled={authBusy}
+                onChange={(event) => setLoginPassword(event.target.value)}
+              />
+            </label>
+            {authError ? <div className="login-error" role="alert">{authError}</div> : null}
+            <button className="primary-button" type="submit" disabled={authBusy}>
+              {authBusy ? "Đang đăng nhập…" : "Đăng nhập"}
+            </button>
+          </form>
+        </div>
+      ) : null}
 
       <main className="chat-main">
         <div className="conversation" aria-live="polite">
@@ -1126,6 +1948,24 @@ export default function App() {
                 </div>
               );
             }
+            if (item.type === "memory_confirmation") {
+              return (
+                <div className="message-row assistant-row" key={item.id}>
+                  <img
+                    className="assistant-avatar"
+                    src="/advisor-logo.png"
+                    alt=""
+                  />
+                  <MemoryConfirmationCard
+                    item={item}
+                    disabled={busy || item.submitted}
+                    onSubmit={(decisions) =>
+                      void submitMemoryConfirmation(item, decisions)
+                    }
+                  />
+                </div>
+              );
+            }
             return (
               <div className="message-row assistant-row" key={item.id}>
                 <img
@@ -1171,6 +2011,29 @@ export default function App() {
             <div className="status-row" role="status">
               <span className="status-dot" aria-hidden="true" />
               {state.progress}
+            </div>
+          ) : null}
+
+          {memoryNotice ? (
+            <div className={`memory-notice ${memoryNotice.status}`} role="status">
+              <span aria-hidden="true">
+                {memoryNotice.status === "updating"
+                  ? "↻"
+                  : memoryNotice.status === "success"
+                    ? "✓"
+                    : "!"}
+              </span>
+              {memoryNotice.message}
+            </div>
+          ) : null}
+
+          {authError && !loginOpen ? (
+            <div className="error-banner" role="alert">
+              <div>
+                <strong>Lỗi tài khoản</strong>
+                <span>{authError}</span>
+              </div>
+              <button type="button" onClick={() => setAuthError(null)}>Đóng</button>
             </div>
           ) : null}
 
@@ -1237,6 +2100,19 @@ export default function App() {
           </strong>
         </div>
       </footer>
+
+      {memoryPanelOpen && session ? (
+        <MemoryPanel
+          records={memoryRecords}
+          count={memoryCount}
+          loading={memoryLoading}
+          error={memoryError}
+          onClose={() => setMemoryPanelOpen(false)}
+          onRefresh={() => void refreshMemories()}
+          onDelete={(id) => void handleDeleteMemory(id)}
+          onDeleteAll={() => void handleDeleteAllMemories()}
+        />
+      ) : null}
     </div>
   );
 }
