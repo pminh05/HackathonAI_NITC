@@ -33,6 +33,7 @@ from advisor.retrieval.qdrant import (
     find_missing_indexes,
 )
 from advisor.schemas import ApplicationSettings, ClarificationAnswer
+from advisor.suggestions import SuggestionRequest, generate_suggestions
 
 
 logger = logging.getLogger(__name__)
@@ -465,6 +466,58 @@ async def _stream_graph(
         await registry.release(thread_id)
 
 
+async def _stream_suggestions(
+    *, request: Request, payload: SuggestionRequest
+) -> AsyncIterator[str]:
+    """Generate suggestions independently while keeping the SSE connection alive."""
+    task = asyncio.create_task(
+        asyncio.to_thread(
+            generate_suggestions,
+            request.app.state.suggestion_llm,
+            payload,
+        )
+    )
+    try:
+        yield encode_sse("suggestions_started", {"status": "running"})
+        while not task.done():
+            done, _ = await asyncio.wait(
+                {task}, timeout=request.app.state.settings.sse_heartbeat_seconds
+            )
+            if done:
+                break
+            if await request.is_disconnected():
+                task.cancel()
+                return
+            yield ": heartbeat\n\n"
+        result = task.result()
+        request.app.state.guardrail_engine.enforce_value(
+            result.model_dump(mode="json"), surface="suggestion_output"
+        )
+        yield encode_sse("suggestions", result.model_dump(mode="json"))
+    except asyncio.CancelledError:
+        task.cancel()
+        raise
+    except GuardrailBlockedError:
+        yield encode_sse(
+            "error",
+            {
+                "code": "guardrail_blocked",
+                "message": "Không thể tạo câu hỏi gợi ý an toàn.",
+                "retryable": False,
+            },
+        )
+    except Exception:
+        logger.exception("Suggestion generation failed")
+        yield encode_sse(
+            "error",
+            {
+                "code": "suggestion_service_error",
+                "message": "Không thể tạo câu hỏi gợi ý lúc này.",
+                "retryable": True,
+            },
+        )
+
+
 def _streaming_response(iterator: AsyncIterator[str]) -> StreamingResponse:
     return StreamingResponse(
         iterator,
@@ -478,6 +531,7 @@ def create_app(
     *,
     graph: Any | None = None,
     llm: Any | None = None,
+    suggestion_llm: Any | None = None,
     qdrant_client: Any | None = None,
     category_registry: CategoryRegistry | None = None,
     validate_services: bool = True,
@@ -492,6 +546,7 @@ def create_app(
         application.state.guardrail_engine = GuardrailEngine(
             mode=app_settings.guardrail_mode
         )
+        application.state.suggestion_llm = suggestion_llm or llm
         application.state.ready = False
         if graph is not None:
             application.state.graph = graph
@@ -509,6 +564,12 @@ def create_app(
         resolved_registry = category_registry or build_default_registry()
         resolved_registry.validate_all()
         try:
+            if application.state.suggestion_llm is None:
+                from advisor.nodes import create_advisor_chat_model
+
+                application.state.suggestion_llm = create_advisor_chat_model(
+                    app_settings
+                )
             if validate_services:
                 for category, definition in resolved_registry.all().items():
                     if not definition.implemented:
@@ -534,7 +595,7 @@ def create_app(
                 application.state.graph = build_graph(
                     settings=app_settings,
                     checkpointer=checkpointer,
-                    llm=llm,
+                    llm=llm or application.state.suggestion_llm,
                     qdrant_client=client,
                     category_registry=resolved_registry,
                     guardrail_engine=application.state.guardrail_engine,
@@ -632,6 +693,24 @@ def create_app(
         except Exception:
             await registry.release(thread_key)
             raise
+
+    @application.post("/suggestions", responses=sse_response_docs)
+    async def suggestions(
+        payload: SuggestionRequest, request: Request
+    ) -> StreamingResponse:
+        if request.app.state.suggestion_llm is None:
+            raise HTTPException(
+                status_code=503, detail="Suggestion model is not configured"
+            )
+        conversation_text = "\n".join(
+            message.content for message in payload.conversation
+        )
+        _enforce_request_guardrail(
+            request.app, conversation_text, surface="suggestion_conversation"
+        )
+        return _streaming_response(
+            _stream_suggestions(request=request, payload=payload)
+        )
 
     @application.post("/chat/{thread_id}/resume", responses=sse_response_docs)
     async def resume_chat(

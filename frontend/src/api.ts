@@ -36,6 +36,11 @@ export interface ThreadStatus {
   selected_products: SelectedProduct[];
 }
 
+export interface SuggestionConversationMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export type SseEvent =
   | { event: "session"; data: { thread_id: string; mode: "started" | "continued" | "resumed" } }
   | { event: "progress"; data: { stage: string } }
@@ -48,6 +53,8 @@ export type SseEvent =
       event: "completed";
       data: { thread_id: string; answer: string; selected_products: SelectedProduct[] };
     }
+  | { event: "suggestions_started"; data: { status: "running" } }
+  | { event: "suggestions"; data: { questions: string[] } }
   | {
       event: "error";
       data: { code: string; message: string; retryable: boolean };
@@ -123,6 +130,8 @@ function parseEventBlock(block: string): SseEvent | null {
     "clarification_required",
     "token",
     "completed",
+    "suggestions_started",
+    "suggestions",
     "error",
   ]);
   if (!supported.has(eventName)) return null;
@@ -201,6 +210,14 @@ export function resumeChat(
   signal?: AbortSignal,
 ): Promise<void> {
   return streamPost(`/chat/${encodeURIComponent(threadId)}/resume`, { answers }, onEvent, signal);
+}
+
+export function streamSuggestions(
+  conversation: SuggestionConversationMessage[],
+  onEvent: (event: SseEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamPost("/suggestions", { conversation }, onEvent, signal);
 }
 
 export async function getThreadStatus(threadId: string, signal?: AbortSignal): Promise<ThreadStatus> {
